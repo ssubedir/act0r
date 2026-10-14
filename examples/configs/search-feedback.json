@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "width": 3,
+  "warmup_steps": 2,
+  "rollout_steps": 1,
+  "task": {
+    "agent": {
+      "goal": "Fix add to return the sum of its arguments. Inspect files and run feedback tests.",
+      "workspace": "",
+      "target": { "provider": "scripted", "model": "fixture", "endpoint": "" },
+      "test_command": ["cargo", "test", "--locked", "--offline", "--test", "feedback"],
+      "writable_paths": ["src/lib.rs"],
+      "require_approval": false,
+      "repeat_safe_tests": true,
+      "max_model_calls": 3,
+      "max_tokens": 150000,
+      "max_output_tokens": 1024,
+      "script": [
+        { "kind": "list_files" },
+        { "kind": "read_file", "path": "src/lib.rs" },
+        { "kind": "replace_text", "path": "src/lib.rs", "old": "left - right", "new": "left + right" },
+        { "kind": "run_tests" },
+        { "kind": "finish", "summary": "Implemented addition and passed feedback tests." }
+      ]
+    },
+    "candidates": 1,
+    "budget": { "max_attempts": 60, "max_model_calls": 3, "max_tokens": 150000 },
+    "protected_paths": ["Cargo.toml", "Cargo.lock", "tests/"]
+  },
+  "scripted_proposals": [
+    { "kind": "replace_text", "path": "src/lib.rs", "old": "left - right", "new": "left * right" },
+    { "kind": "replace_text", "path": "src/lib.rs", "old": "left - right", "new": "left + right" },
+    { "kind": "replace_text", "path": "src/lib.rs", "old": "left - right", "new": "left" }
+  ],
+  "final_tests": {
+    "source": "../benchmark-cases/addition/held-out",
+    "test_command": ["cargo", "test", "--locked", "--offline"]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "goal": "Replaced by each case goal.",
+  "workspace": "",
+  "target": {
+    "provider": "openai",
+    "protocol": "chat_completions",
+    "model": "moonshotai/kimi-k3",
+    "endpoint": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "policy": {
+      "request_timeout_ms": 90000,
+      "connect_timeout_ms": 10000,
+      "max_attempts": 2,
+      "retry_delay_ms": 1000,
+      "max_retry_delay_ms": 60000
+    }
+  },
+  "test_command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--test",
+    "feedback"
+  ],
+  "writable_paths": [
+    "src/lib.rs"
+  ],
+  "require_approval": false,
+  "repeat_safe_tests": true,
+  "max_model_calls": 24,
+  "max_tokens": 150000,
+  "max_output_tokens": 2048,
+  "context": {
+    "version": 1,
+    "max_input_bytes": 65536,
+    "max_observations": 16
+  }
+}

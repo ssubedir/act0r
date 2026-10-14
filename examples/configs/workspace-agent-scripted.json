@@ -1,0 +1,16 @@
+{
+  "goal": "Inspect the project's README.",
+  "target": { "provider": "scripted", "model": "inspect", "endpoint": "" },
+  "max_model_calls": 3,
+  "max_tokens": 100000,
+  "max_output_tokens": 512,
+  "tools": [
+    { "name": "list_files", "version": 2 },
+    { "name": "read_file", "version": 2 }
+  ],
+  "script": [
+    { "kind": "call_tool", "tool": "list_files", "arguments": {} },
+    { "kind": "call_tool", "tool": "read_file", "arguments": { "path": "README.md" } },
+    { "kind": "finish", "summary": "Inspected the saved project." }
+  ]
+}

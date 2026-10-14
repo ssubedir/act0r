@@ -1,0 +1,12 @@
+{
+  "goal": "Use a native tool and explain its result.",
+  "target": { "provider": "scripted", "model": "fixture", "endpoint": "" },
+  "max_model_calls": 4,
+  "max_tokens": 100000,
+  "max_output_tokens": 512,
+  "tools": [{ "name": "sum", "version": 1 }],
+  "script": [
+    { "kind": "call_tool", "tool": "sum", "arguments": { "left": 19, "right": 23 } },
+    { "kind": "finish", "summary": "The native sum tool returned 42." }
+  ]
+}

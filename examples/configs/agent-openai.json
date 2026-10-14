@@ -1,0 +1,13 @@
+{
+  "goal": "Inspect the Rust project, fix add so it adds its arguments, and run the tests.",
+  "workspace": "",
+  "target": { "provider": "openai", "model": "REPLACE_WITH_YOUR_MODEL", "endpoint": "https://api.openai.com/v1/responses" },
+  "test_command": ["cargo", "test", "--offline"],
+  "writable_paths": ["src/lib.rs"],
+  "require_approval": true,
+  "repeat_safe_tests": true,
+  "max_model_calls": 15,
+  "max_tokens": 150000,
+  "max_output_tokens": 2048,
+  "context": { "version": 1, "max_input_bytes": 65536, "max_observations": 16 }
+}

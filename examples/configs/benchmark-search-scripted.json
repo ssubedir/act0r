@@ -1,0 +1,373 @@
+{
+  "version": 2,
+  "name": "rust-pilot-five-search",
+  "repetitions": 1,
+  "agent": {
+    "goal": "Replaced by each case goal.",
+    "workspace": "",
+    "target": {
+      "provider": "scripted",
+      "model": "fixture",
+      "endpoint": ""
+    },
+    "test_command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--test",
+      "feedback"
+    ],
+    "writable_paths": [
+      "src/lib.rs"
+    ],
+    "require_approval": false,
+    "repeat_safe_tests": true,
+    "max_model_calls": 24,
+    "max_tokens": 150000,
+    "max_output_tokens": 1024,
+    "context": {
+      "version": 1,
+      "max_input_bytes": 65536,
+      "max_observations": 16
+    }
+  },
+  "budget": {
+    "max_attempts": 60,
+    "max_model_calls": 24,
+    "max_tokens": 150000
+  },
+  "protected_paths": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "tests/"
+  ],
+  "final_test_command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline"
+  ],
+  "cases": [
+    {
+      "name": "addition",
+      "goal": "Fix add to return the sum of two i32 arguments.",
+      "source": "../benchmark-cases/addition/source",
+      "final_tests_source": "../benchmark-cases/addition/held-out",
+      "script": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "left - right",
+          "new": "left + right"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "list_files"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/lib.rs"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "left - right",
+          "new": "left + right"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "left - right",
+          "new": "left * right"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "left - right",
+          "new": "left + right"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "left - right",
+          "new": "left"
+        }
+      ]
+    },
+    {
+      "name": "clamp",
+      "goal": "Fix clamp to keep value within the inclusive min..max range. Inputs always satisfy min <= max.",
+      "source": "../benchmark-cases/clamp/source",
+      "final_tests_source": "../benchmark-cases/clamp/held-out",
+      "script": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "value.max(min)",
+          "new": "value.max(min).min(max)"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "list_files"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/lib.rs"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "value.max(min)",
+          "new": "value.max(min).min(max)"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "value.max(min)",
+          "new": "min"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "value.max(min)",
+          "new": "value.max(min).min(max)"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "value.max(min)",
+          "new": "max"
+        }
+      ]
+    },
+    {
+      "name": "palindrome",
+      "goal": "Fix is_palindrome to compare Unicode characters with their reverse. Comparison is case-sensitive and the empty string is a palindrome.",
+      "source": "../benchmark-cases/palindrome/source",
+      "final_tests_source": "../benchmark-cases/palindrome/held-out",
+      "script": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "input.chars().eq(input.chars())",
+          "new": "input.chars().eq(input.chars().rev())"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "list_files"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/lib.rs"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "input.chars().eq(input.chars())",
+          "new": "input.chars().eq(input.chars().rev())"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "input.chars().eq(input.chars())",
+          "new": "false"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "input.chars().eq(input.chars())",
+          "new": "input.chars().eq(input.chars().rev())"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "input.chars().eq(input.chars())",
+          "new": "true"
+        }
+      ]
+    },
+    {
+      "name": "median",
+      "goal": "Fix median to return the upper middle value after sorting the integers, or None for an empty slice.",
+      "source": "../benchmark-cases/median/source",
+      "final_tests_source": "../benchmark-cases/median/held-out",
+      "script": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "sorted.first().copied()",
+          "new": "sorted.get(sorted.len() / 2).copied()"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "list_files"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/lib.rs"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "sorted.first().copied()",
+          "new": "sorted.get(sorted.len() / 2).copied()"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "sorted.first().copied()",
+          "new": "None"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "sorted.first().copied()",
+          "new": "sorted.get(sorted.len() / 2).copied()"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "sorted.first().copied()",
+          "new": "Some(0)"
+        }
+      ]
+    },
+    {
+      "name": "words",
+      "goal": "Fix count_words to count nonempty words separated by any Unicode whitespace. Empty input has zero words.",
+      "source": "../benchmark-cases/words/source",
+      "final_tests_source": "../benchmark-cases/words/held-out",
+      "script": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "text.split(' ').count()",
+          "new": "text.split_whitespace().count()"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "list_files"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/lib.rs"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "text.split(' ').count()",
+          "new": "text.split_whitespace().count()"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Implemented the specified behavior and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "text.split(' ').count()",
+          "new": "text.len()"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "text.split(' ').count()",
+          "new": "text.split_whitespace().count()"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/lib.rs",
+          "old": "text.split(' ').count()",
+          "new": "0"
+        }
+      ]
+    }
+  ],
+  "search": {
+    "width": 3,
+    "warmup_steps": 2,
+    "rollout_steps": 2
+  }
+}

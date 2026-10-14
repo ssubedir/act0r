@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "name": "research-demo",
+  "planner": {
+    "attempt_limit": 40,
+    "queue_policy": { "task_capacity": 8 },
+    "config": {
+      "goal": "Combine the researcher and reviewer results",
+      "target": { "provider": "scripted", "model": "planner", "endpoint": "" },
+      "max_model_calls": 2,
+      "max_tokens": 500000,
+      "max_output_tokens": 512,
+      "goal_budget": { "max_model_calls": 4, "max_tokens": 1000000 },
+      "delegation": { "max_tasks": 2, "max_depth": 2, "max_parallel_tasks": 2 },
+      "memory": {},
+      "script": [
+        { "kind": "delegate_tasks", "tasks": [
+          { "worker": "researcher", "goal": "Propose a durable actor design" },
+          { "worker": "reviewer", "goal": "Review durability and restart requirements" }
+        ] },
+        { "kind": "finish", "summary": "Both workers completed. Persist actor mailboxes and execution checkpoints in SQLite." }
+      ]
+    }
+  },
+  "workers": [
+    {
+      "name": "researcher",
+      "description": "Proposes an actor design",
+      "adapter": { "name": "answer", "version": 1 },
+      "config": {
+        "goal": "Research the requested design",
+        "target": { "provider": "scripted", "model": "researcher", "endpoint": "" },
+        "max_model_calls": 1,
+        "max_tokens": 200000,
+        "max_output_tokens": 512,
+        "script": [{ "kind": "finish", "summary": "Use persistent actors with serial mailbox transitions and separate durable Runs." }]
+      }
+    },
+    {
+      "name": "reviewer",
+      "description": "Reviews recovery requirements",
+      "adapter": { "name": "answer", "version": 1 },
+      "config": {
+        "goal": "Review the requested design",
+        "target": { "provider": "scripted", "model": "reviewer", "endpoint": "" },
+        "max_model_calls": 1,
+        "max_tokens": 200000,
+        "max_output_tokens": 512,
+        "script": [{ "kind": "finish", "summary": "Persist waits and results, reuse stable identities, and reconcile uncertain external effects." }]
+      }
+    }
+  ]
+}

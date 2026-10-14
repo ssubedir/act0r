@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "name": "human-inbox-demo",
+  "source": "team-inbox-source",
+  "planner": {
+    "config": {
+      "goal": "Coordinate a reviewed edit",
+      "target": { "provider": "scripted", "model": "inbox-planner", "endpoint": "" },
+      "max_model_calls": 2,
+      "max_tokens": 500000,
+      "max_output_tokens": 512,
+      "goal_budget": { "max_model_calls": 6, "max_tokens": 1000000 },
+      "delegation": { "max_tasks": 2, "max_depth": 2, "max_parallel_tasks": 2 },
+      "script": [
+        { "kind": "delegate_tasks", "tasks": [
+          { "worker": "editor", "goal": "Change Draft to Reviewed in README.md" },
+          { "worker": "reviewer", "goal": "Ask the operator which review to perform" }
+        ] },
+        { "kind": "finish", "summary": "Both workers completed their approved work." }
+      ]
+    }
+  },
+  "workers": [
+    {
+      "name": "editor",
+      "description": "Edits the managed README after explicit approval",
+      "adapter": { "name": "tool", "version": 1 },
+      "config": {
+        "goal": "Perform the approved edit",
+        "target": { "provider": "scripted", "model": "inbox-editor", "endpoint": "" },
+        "max_model_calls": 2,
+        "max_tokens": 200000,
+        "max_output_tokens": 512,
+        "tools": [{ "name": "replace_text", "version": 1 }],
+        "writable_paths": ["README.md"],
+        "script": [
+          { "kind": "call_tool", "tool": "replace_text", "arguments": { "path": "README.md", "old": "Draft", "new": "Reviewed" } },
+          { "kind": "finish", "summary": "Edit decision handled." }
+        ]
+      }
+    },
+    {
+      "name": "reviewer",
+      "description": "Clarifies the human review requirements",
+      "adapter": { "name": "answer", "version": 1 },
+      "config": {
+        "goal": "Review the requested change",
+        "target": { "provider": "scripted", "model": "inbox-reviewer", "endpoint": "" },
+        "max_model_calls": 2,
+        "max_tokens": 200000,
+        "max_output_tokens": 512,
+        "script": [
+          { "kind": "ask_human", "question": "Should I review durability or code style?" },
+          { "kind": "finish", "summary": "Review complete with the operator's clarification." }
+        ]
+      }
+    }
+  ]
+}

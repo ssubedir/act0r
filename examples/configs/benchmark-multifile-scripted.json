@@ -1,0 +1,328 @@
+{
+  "version": 2,
+  "name": "rust-multifile-three-search",
+  "repetitions": 3,
+  "agent": {
+    "goal": "Replaced by each case goal.",
+    "workspace": "",
+    "target": {
+      "provider": "scripted",
+      "model": "fixture",
+      "endpoint": ""
+    },
+    "test_command": [
+      "cargo",
+      "test",
+      "--locked",
+      "--offline",
+      "--test",
+      "feedback"
+    ],
+    "writable_paths": [
+      "src/"
+    ],
+    "require_approval": false,
+    "repeat_safe_tests": true,
+    "max_model_calls": 24,
+    "max_tokens": 150000,
+    "max_output_tokens": 2048,
+    "context": {
+      "version": 1,
+      "max_input_bytes": 65536,
+      "max_observations": 16
+    }
+  },
+  "budget": {
+    "max_attempts": 80,
+    "max_model_calls": 24,
+    "max_tokens": 150000
+  },
+  "protected_paths": [
+    "Cargo.toml",
+    "Cargo.lock",
+    "tests/"
+  ],
+  "final_test_command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline"
+  ],
+  "cases": [
+    {
+      "name": "retry-schedule",
+      "goal": "First read src/backoff.rs and src/schedule.rs and run the existing feedback tests, then repair both modules while preserving their public APIs. delay(attempt, base_ms, max_delay_ms) uses one-based completed attempts: base_ms * 2^(attempt-1), capped at max_delay_ms without overflow. next_retry returns None when attempt >= max_attempts; otherwise returns now_ms plus that delay, saturating at u64::MAX. Inputs have attempt >= 1, max_attempts >= 1 and base_ms <= max_delay_ms; zero base delay is valid.",
+      "source": "../benchmark-cases/retry-schedule/source",
+      "final_tests_source": "../benchmark-cases/retry-schedule/held-out",
+      "script": [
+        {
+          "kind": "read_file",
+          "path": "src/backoff.rs"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/schedule.rs"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/backoff.rs",
+          "old": "base_ms.min(max_delay_ms)",
+          "new": "let multiplier = 1_u64.checked_shl(attempt.saturating_sub(1)).unwrap_or(u64::MAX);\n    base_ms.saturating_mul(multiplier).min(max_delay_ms)"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/schedule.rs",
+          "old": "Some(now_ms + delay)",
+          "new": "Some(now_ms.saturating_add(delay))"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Repaired both modules and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "read_file",
+          "path": "src/backoff.rs"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/schedule.rs"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/backoff.rs",
+          "old": "base_ms.min(max_delay_ms)",
+          "new": "let multiplier = 1_u64.checked_shl(attempt.saturating_sub(1)).unwrap_or(u64::MAX);\n    base_ms.saturating_mul(multiplier).min(max_delay_ms)"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/schedule.rs",
+          "old": "Some(now_ms + delay)",
+          "new": "Some(now_ms.saturating_add(delay))"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Repaired both modules and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/backoff.rs",
+          "old": "base_ms.min(max_delay_ms)",
+          "new": "base_ms.saturating_mul(u64::from(attempt)).min(max_delay_ms)"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/backoff.rs",
+          "old": "base_ms.min(max_delay_ms)",
+          "new": "let multiplier = 1_u64.checked_shl(attempt.saturating_sub(1)).unwrap_or(u64::MAX);\n    base_ms.saturating_mul(multiplier).min(max_delay_ms)"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/backoff.rs",
+          "old": "base_ms.min(max_delay_ms)",
+          "new": "max_delay_ms"
+        }
+      ]
+    },
+    {
+      "name": "path-routing",
+      "goal": "First read src/normalize.rs and src/route.rs and run the existing feedback tests, then repair both modules while preserving their public APIs. canonical_path ignores empty slash-separated segments and returns one leading slash and no trailing slash; an empty path is '/'. Preserve every nonempty segment exactly, including Unicode and case. Do not resolve dots, decode escapes or interpret queries. matches_route canonicalizes both inputs and matches a whole segment prefix: '/api' matches '/api' and '/api/users', but not '/apiary'. The root '/' matches every path.",
+      "source": "../benchmark-cases/path-routing/source",
+      "final_tests_source": "../benchmark-cases/path-routing/held-out",
+      "script": [
+        {
+          "kind": "read_file",
+          "path": "src/normalize.rs"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/route.rs"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/normalize.rs",
+          "old": "format!(\"/{}\", input.trim_matches('/'))",
+          "new": "format!(\"/{}\", input.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>().join(\"/\"))"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/route.rs",
+          "old": "path.starts_with(&prefix)",
+          "new": "prefix == \"/\" || path == prefix || path.strip_prefix(&prefix).is_some_and(|tail| tail.starts_with('/'))"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Repaired both modules and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "read_file",
+          "path": "src/normalize.rs"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/route.rs"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/normalize.rs",
+          "old": "format!(\"/{}\", input.trim_matches('/'))",
+          "new": "format!(\"/{}\", input.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>().join(\"/\"))"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/route.rs",
+          "old": "path.starts_with(&prefix)",
+          "new": "prefix == \"/\" || path == prefix || path.strip_prefix(&prefix).is_some_and(|tail| tail.starts_with('/'))"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Repaired both modules and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/normalize.rs",
+          "old": "format!(\"/{}\", input.trim_matches('/'))",
+          "new": "format!(\"/{}\", input.trim_matches('/').replace(\"//\", \"/\"))"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/normalize.rs",
+          "old": "format!(\"/{}\", input.trim_matches('/'))",
+          "new": "format!(\"/{}\", input.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>().join(\"/\"))"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/normalize.rs",
+          "old": "format!(\"/{}\", input.trim_matches('/'))",
+          "new": "format!(\"/{}\", input.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>().join(\"/\").to_lowercase())"
+        }
+      ]
+    },
+    {
+      "name": "config-overlay",
+      "goal": "First read src/parser.rs and src/merge.rs and run the existing feedback tests, then repair both modules while preserving their public APIs. parse reads trimmed key=value lines, splits at the FIRST equals sign and preserves any further equals signs in the trimmed value. Skip blank lines and whole-line comments beginning '#'; reject lines without '=' and empty keys. Duplicate keys use the last value; empty values and Unicode keys are valid. overlay returns the union of defaults and overrides, with overrides winning on duplicate keys, including empty override values. Do not mutate the supplied defaults.",
+      "source": "../benchmark-cases/config-overlay/source",
+      "final_tests_source": "../benchmark-cases/config-overlay/held-out",
+      "script": [
+        {
+          "kind": "read_file",
+          "path": "src/parser.rs"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/merge.rs"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/parser.rs",
+          "old": "        let parts: Vec<_> = line.split('=').collect();\n        if parts.len() != 2 {\n            return Err(\"expected key=value\".into());\n        }\n        let key = parts[0].trim();\n        let value = parts[1].trim();",
+          "new": "        let (key, value) = line.split_once('=').ok_or(\"expected key=value\")?;\n        let key = key.trim();\n        let value = value.trim();"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/merge.rs",
+          "old": "overrides.insert(key.clone(), value.clone());",
+          "new": "overrides.entry(key.clone()).or_insert_with(|| value.clone());"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Repaired both modules and passed feedback tests."
+        }
+      ],
+      "search_script": [
+        {
+          "kind": "read_file",
+          "path": "src/parser.rs"
+        },
+        {
+          "kind": "read_file",
+          "path": "src/merge.rs"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/parser.rs",
+          "old": "        let parts: Vec<_> = line.split('=').collect();\n        if parts.len() != 2 {\n            return Err(\"expected key=value\".into());\n        }\n        let key = parts[0].trim();\n        let value = parts[1].trim();",
+          "new": "        let (key, value) = line.split_once('=').ok_or(\"expected key=value\")?;\n        let key = key.trim();\n        let value = value.trim();"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/merge.rs",
+          "old": "overrides.insert(key.clone(), value.clone());",
+          "new": "overrides.entry(key.clone()).or_insert_with(|| value.clone());"
+        },
+        {
+          "kind": "run_tests"
+        },
+        {
+          "kind": "finish",
+          "summary": "Repaired both modules and passed feedback tests."
+        }
+      ],
+      "scripted_proposals": [
+        {
+          "kind": "replace_text",
+          "path": "src/parser.rs",
+          "old": "        let parts: Vec<_> = line.split('=').collect();\n        if parts.len() != 2 {\n            return Err(\"expected key=value\".into());\n        }\n        let key = parts[0].trim();\n        let value = parts[1].trim();",
+          "new": "        let (key, value) = line.rsplit_once('=').ok_or(\"expected key=value\")?;\n        let key = key.trim();\n        let value = value.trim();"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/parser.rs",
+          "old": "        let parts: Vec<_> = line.split('=').collect();\n        if parts.len() != 2 {\n            return Err(\"expected key=value\".into());\n        }\n        let key = parts[0].trim();\n        let value = parts[1].trim();",
+          "new": "        let (key, value) = line.split_once('=').ok_or(\"expected key=value\")?;\n        let key = key.trim();\n        let value = value.trim();"
+        },
+        {
+          "kind": "replace_text",
+          "path": "src/parser.rs",
+          "old": "        let parts: Vec<_> = line.split('=').collect();\n        if parts.len() != 2 {\n            return Err(\"expected key=value\".into());\n        }\n        let key = parts[0].trim();\n        let value = parts[1].trim();",
+          "new": "        let (key, value) = line.split_once(\" = \").ok_or(\"expected key=value\")?;\n        let key = key.trim();\n        let value = value.trim();"
+        }
+      ]
+    }
+  ],
+  "search": {
+    "width": 3,
+    "warmup_steps": 3,
+    "rollout_steps": 3
+  }
+}

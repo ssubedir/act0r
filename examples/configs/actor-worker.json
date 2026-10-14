@@ -1,0 +1,5 @@
+{
+  "workflow": { "name": "demo", "version": 1 },
+  "input": { "message": "Durable actor delegation" },
+  "attempt_limit": 10
+}

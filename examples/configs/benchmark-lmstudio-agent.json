@@ -1,0 +1,31 @@
+{
+  "goal": "Replaced by each case goal.",
+  "workspace": "",
+  "target": {
+    "provider": "openai",
+    "protocol": "chat_completions",
+    "model": "prism-ml/bonsai-27b",
+    "endpoint": "http://localhost:11434/v1/chat/completions"
+  },
+  "test_command": [
+    "cargo",
+    "test",
+    "--locked",
+    "--offline",
+    "--test",
+    "feedback"
+  ],
+  "writable_paths": [
+    "src/lib.rs"
+  ],
+  "require_approval": false,
+  "repeat_safe_tests": true,
+  "max_model_calls": 24,
+  "max_tokens": 150000,
+  "max_output_tokens": 2048,
+  "context": {
+    "version": 1,
+    "max_input_bytes": 65536,
+    "max_observations": 16
+  }
+}

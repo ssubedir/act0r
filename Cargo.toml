@@ -1,0 +1,70 @@
+[package]
+name = "act0r"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+description = "A local AI agent harness with durable actors, SQLite recovery and MCP tools"
+license = "MIT"
+readme = "README.md"
+keywords = ["ai", "agents", "actors", "durable-workflows", "mcp"]
+categories = ["asynchronous", "development-tools"]
+
+[workspace]
+members = ["crates/act0r-runtime"]
+default-members = [".", "crates/act0r-runtime"]
+resolver = "3"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "sqlite"] }
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync", "process", "io-util", "fs", "net"] }
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+sha2 = "0.10"
+httpdate = "1"
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
+tempfile = "3"
+axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-async-rw"] }
+jsonschema = { version = "0.58.6", default-features = false }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
+libc = "0.2"
+
+[dependencies]
+act0r-runtime = { path = "crates/act0r-runtime", version = "0.1.0" }
+clap = { version = "4", features = ["derive"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tempfile.workspace = true
+axum.workspace = true
+futures-util.workspace = true
+
+[dev-dependencies]
+sqlx.workspace = true
+uuid.workspace = true
+reqwest.workspace = true
+sha2.workspace = true
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys.workspace = true
+
+[target.'cfg(unix)'.dev-dependencies]
+libc.workspace = true
+
+[[bin]]
+name = "act0r"
+path = "src/bin/act0r.rs"
+
+# Keep local development and inherited test builds small. Dependencies remain cached;
+# full debug symbols and per-target incremental snapshots accounted for most disk growth.
+[profile.dev]
+debug = 1
+incremental = false
+

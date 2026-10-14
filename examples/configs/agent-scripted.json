@@ -1,0 +1,20 @@
+{
+  "goal": "Fix add so it adds its arguments and run the tests.",
+  "workspace": "",
+  "target": { "provider": "scripted", "model": "fixture", "endpoint": "" },
+  "test_command": ["cargo", "test", "--offline"],
+  "writable_paths": ["src/lib.rs"],
+  "require_approval": true,
+  "repeat_safe_tests": true,
+  "max_model_calls": 10,
+  "max_tokens": 100000,
+  "max_output_tokens": 1024,
+  "context": { "version": 1, "max_input_bytes": 65536, "max_observations": 16 },
+  "script": [
+    { "kind": "list_files" },
+    { "kind": "read_file", "path": "src/lib.rs" },
+    { "kind": "replace_text", "path": "src/lib.rs", "old": "left - right", "new": "left + right" },
+    { "kind": "run_tests" },
+    { "kind": "finish", "summary": "Corrected integer addition and verified the tests." }
+  ]
+}

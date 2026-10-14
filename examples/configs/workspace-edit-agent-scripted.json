@@ -1,0 +1,18 @@
+{
+  "goal": "Read, update, and inspect the README.",
+  "target": {"provider": "scripted", "model": "edit", "endpoint": ""},
+  "max_model_calls": 4,
+  "max_tokens": 300000,
+  "max_output_tokens": 512,
+  "tools": [
+    {"name": "read_file", "version": 2},
+    {"name": "replace_text", "version": 1}
+  ],
+  "writable_paths": ["README.md"],
+  "script": [
+    {"kind": "call_tool", "tool": "read_file", "arguments": {"path": "README.md"}},
+    {"kind": "call_tool", "tool": "replace_text", "arguments": {"path": "README.md", "old": "Original project evidence.", "new": "Updated project evidence."}},
+    {"kind": "call_tool", "tool": "read_file", "arguments": {"path": "README.md"}},
+    {"kind": "finish", "summary": "Updated and inspected the README."}
+  ]
+}

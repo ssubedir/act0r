@@ -1,0 +1,22 @@
+# Generated Rust and JavaScript dependencies/builds, including fixture projects.
+**/target/
+**/node_modules/
+
+# Local harness state, tools and validation evidence.
+/.build/
+/.act0r/
+*.db
+*.db-shm
+*.db-wal
+*.db.worker.lock
+*.log
+
+# Local credentials and machine-specific editor/OS files.
+.env
+.env.*
+!.env.example
+!.env.*.example
+.DS_Store
+Thumbs.db
+*.swp
+*~

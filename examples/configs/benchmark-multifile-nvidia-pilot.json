@@ -1,0 +1,42 @@
+{
+  "version": 2,
+  "name": "nvidia-multifile-path-routing-pilot",
+  "repetitions": 1,
+  "agent": {
+    "goal": "Replaced by each case goal.",
+    "workspace": "",
+    "target": {
+      "provider": "openai",
+      "protocol": "chat_completions",
+      "model": "moonshotai/kimi-k3",
+      "endpoint": "https://integrate.api.nvidia.com/v1/chat/completions",
+      "policy": {
+        "request_timeout_ms": 90000,
+        "connect_timeout_ms": 10000,
+        "max_attempts": 2,
+        "retry_delay_ms": 1000,
+        "max_retry_delay_ms": 60000
+      }
+    },
+    "test_command": ["cargo", "test", "--locked", "--offline", "--test", "feedback"],
+    "writable_paths": ["src/"],
+    "require_approval": false,
+    "repeat_safe_tests": true,
+    "max_model_calls": 24,
+    "max_tokens": 150000,
+    "max_output_tokens": 2048,
+    "context": {"version": 1, "max_input_bytes": 65536, "max_observations": 16}
+  },
+  "budget": {"max_attempts": 60, "max_model_calls": 12, "max_tokens": 150000},
+  "protected_paths": ["Cargo.toml", "Cargo.lock", "tests/"],
+  "final_test_command": ["cargo", "test", "--locked", "--offline"],
+  "cases": [
+    {
+      "name": "path-routing",
+      "goal": "First read src/normalize.rs and src/route.rs and run the existing feedback tests, then repair both modules while preserving their public APIs. canonical_path ignores empty slash-separated segments and returns one leading slash and no trailing slash; an empty path is '/'. Preserve every nonempty segment exactly, including Unicode and case. Do not resolve dots, decode escapes or interpret queries. matches_route canonicalizes both inputs and matches a whole segment prefix: '/api' matches '/api' and '/api/users', but not '/apiary'. The root '/' matches every path.",
+      "source": "../benchmark-cases/path-routing/source",
+      "final_tests_source": "../benchmark-cases/path-routing/held-out"
+    }
+  ],
+  "search": {"width": 3, "warmup_steps": 3, "rollout_steps": 3}
+}

@@ -1,0 +1,5 @@
+{
+  "message": "Hello from a durable workflow",
+  "delay_ms": 1000
+}
+

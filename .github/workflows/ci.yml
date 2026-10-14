@@ -1,0 +1,45 @@
+name: CI
+
+"on": [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: '2'
+      # Keep integration-test, example and fixture artifacts within runner disk limits.
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      CARGO_PROFILE_DEV_STRIP: debuginfo
+      CARGO_PROFILE_TEST_STRIP: debuginfo
+      RUST_TEST_THREADS: '2'
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Install Rust
+        run: rustup toolchain install 1.99.0 --profile minimal --component clippy --component rustfmt
+      - name: Format
+        run: cargo +1.99.0 fmt --all -- --check
+      - name: Clippy
+        run: cargo +1.99.0 clippy --locked --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo +1.99.0 test --locked --workspace --all-targets
+      - name: MCP transport and recovery
+        run: cargo +1.99.0 test --locked --test mcp_tools --test mcp_catalog --test mcp_inspection -- --include-ignored
+      - name: Documentation links
+        run: node scripts/check-docs.mjs

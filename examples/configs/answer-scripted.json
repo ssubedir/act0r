@@ -1,0 +1,12 @@
+{
+  "goal": "Explain durable agent execution.",
+  "target": { "provider": "scripted", "model": "answer-fixture", "endpoint": "" },
+  "max_model_calls": 4,
+  "max_tokens": 50000,
+  "max_output_tokens": 512,
+  "max_input_bytes": 65536,
+  "script": [
+    { "kind": "ask_human", "question": "Would you like a short explanation?" },
+    { "kind": "finish", "summary": "A durable agent saves decisions and results, waits for input, and resumes recorded progress after a restart." }
+  ]
+}
