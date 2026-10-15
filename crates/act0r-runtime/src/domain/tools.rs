@@ -257,6 +257,9 @@ impl ToolDefinition {
         if self.requires_project_command {
             metadata["requires_project_command"] = json!(true);
         }
+        if self.external.as_ref().is_some_and(|c| !c.read_only) {
+            metadata["requires_approval"] = json!(true);
+        }
         metadata
     }
     pub fn handler(&self) -> DefinitionId {
@@ -321,6 +324,12 @@ impl ToolDefinition {
         if self.requires_approval {
             let mut payload =
                 json!({"tool":self.id,"arguments":arguments,"recovery":self.recovery});
+            let external_action = self.external.as_ref().filter(|c| !c.read_only);
+            if let Some(contract) = external_action {
+                payload["arguments"] = contract.arguments(arguments);
+                payload["description"] = json!(self.description);
+                payload["binding"] = json!(contract.binding);
+            }
             if let Some(workspace) = workspace {
                 payload["workspace"] = json!(workspace);
             }
@@ -335,7 +344,15 @@ impl ToolDefinition {
             }
             Ok(Command::WaitForInput {
                 key: "native_tool_approval".into(),
-                prompt: format!("Approve native tool {}?", self.id.name),
+                prompt: format!(
+                    "Approve {} {}?",
+                    if external_action.is_some() {
+                        "external action"
+                    } else {
+                        "native tool"
+                    },
+                    self.id.name
+                ),
                 payload,
             })
         } else {
@@ -430,17 +447,21 @@ impl ToolDefinition {
     pub fn validate(&self) -> Result<(), DomainError> {
         if let Some(contract) = &self.external {
             contract.validate()?;
+            let valid_effect_policy = if contract.read_only {
+                !self.requires_approval && self.recovery == RecoveryPolicy::SafeToRepeat
+            } else {
+                !self.requires_workspace
+                    && self.requires_approval
+                    && self.recovery == RecoveryPolicy::RequiresReconciliation
+            };
             if !self.parameters.is_empty()
-                || !contract.read_only
-                || !self.requires_workspace
                 || self.requires_writable_paths
                 || self.requires_test_command
                 || self.requires_project_command
-                || self.requires_approval
                 || !self.reports_errors
-                || self.recovery != RecoveryPolicy::SafeToRepeat
+                || !valid_effect_policy
             {
-                return Err(DomainError::InvalidConfiguration("external schema tools require a read-only, repeat-safe workspace contract without native parameters or write capabilities".into()));
+                return Err(DomainError::InvalidConfiguration("external tools require either a read-only repeat-safe contract or a workspace-free action with approval and reconciliation; native parameters and write capabilities are not supported".into()));
             }
         }
         if !valid_name(&self.id.name)
@@ -715,6 +736,8 @@ pub enum NativeToolResult {
     Success(Value),
     Rejected(ToolError),
     Failure(Failure),
+    /// Execution may have taken effect; recovery follows the pinned policy.
+    Uncertain(String),
 }
 
 /// Expected tool-level problems. Messages are bounded data for the next model decision.

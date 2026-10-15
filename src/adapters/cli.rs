@@ -19,6 +19,7 @@ use std::{
 };
 mod api;
 mod chat;
+mod doctor;
 #[path = "cli/task_inspection.rs"]
 mod task_inspection;
 mod team_events;
@@ -27,7 +28,7 @@ mod teams;
 #[derive(Parser)]
 #[command(version, about = "Durable local workflows for AI agents")]
 pub struct Cli {
-    /// Database file (chat: .act0r/chat.db; other commands: act0r.db).
+    /// Database file (chat/doctor: .act0r/chat.db; other commands: act0r.db).
     #[arg(long, global = true)]
     db: Option<PathBuf>,
     #[arg(long, global = true)]
@@ -39,6 +40,8 @@ pub struct Cli {
 enum TopCommand {
     /// Start or resume a durable conversation; discover and work on an optional project.
     Chat(chat::ChatOptions),
+    /// Check local chat setup without model calls, MCP processes or database startup.
+    Doctor(doctor::DoctorOptions),
     /// Inspect retained harness storage and remove reviewed generated workspace caches.
     Storage {
         #[command(subcommand)]
@@ -480,7 +483,7 @@ enum BenchmarkCommand {
 impl Cli {
     pub fn database(&self) -> &Path {
         self.db.as_deref().unwrap_or_else(|| {
-            if matches!(self.command, TopCommand::Chat(_)) {
+            if matches!(self.command, TopCommand::Chat(_) | TopCommand::Doctor(_)) {
                 Path::new(".act0r/chat.db")
             } else {
                 Path::new("act0r.db")
@@ -489,12 +492,29 @@ impl Cli {
     }
 }
 
+/// Run diagnostics before composition, which opens SQLite and discovers MCP tools.
+pub async fn run(cli: Cli) -> Result<(), Error> {
+    if let TopCommand::Doctor(options) = &cli.command {
+        return doctor::execute(options, cli.database(), cli.json);
+    }
+    if let Some(parent) = cli
+        .database()
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    let (engine, agents) = crate::bootstrap::local_app(cli.database()).await?;
+    execute(cli, engine, agents).await
+}
+
 pub async fn execute(cli: Cli, engine: Engine, agents: AgentService) -> Result<(), Error> {
     let database = cli.database().to_path_buf();
     match cli.command {
         TopCommand::Chat(options) => {
             chat::execute(options, engine, &agents, &database, cli.json).await?
         }
+        TopCommand::Doctor(options) => doctor::execute(&options, &database, cli.json)?,
         TopCommand::Storage { command } => {
             let value = match command {
                 StorageCommand::Report => serde_json::to_value(agents.storage()?.report().await?)?,

@@ -1202,3 +1202,142 @@ async fn chat_without_a_project_supports_followups_and_lists_sessions_without_wo
     assert_eq!(conflict.status.code(), Some(2));
     assert_eq!(provider.calls(), 2);
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_custom_deadline_is_enforced_and_retry_reuses_the_saved_request() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("deadline.db");
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let provider = Provider::with_first_gate(
+        vec![
+            json!({"kind":"finish","summary":"Delayed response"}),
+            json!({"kind":"finish","summary":"Recovered after the request deadline"}),
+        ],
+        Some(gate.clone()),
+    )
+    .await;
+    let events = Running::start(
+        &database,
+        &[
+            "--model",
+            "deadline-fixture",
+            "--endpoint",
+            &provider.endpoint,
+            "--action-format",
+            "function-calling",
+            "--model-timeout-ms",
+            "250",
+            "Answer briefly",
+        ],
+        false,
+    )
+    .finish()
+    .await;
+    gate.notify_waiters();
+    assert_eq!(provider.calls(), 2);
+    assert!(
+        events
+            .iter()
+            .any(|e| e["event"] == "response" && e["data"]["status"] == "succeeded")
+    );
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests[0], requests[1]);
+    }
+    let response = events.iter().find(|e| e["event"] == "response").unwrap();
+    let task: act0r::domain::MessageId = response["data"]["task_id"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let (engine, agents) = act0r::bootstrap::local_app(&database).await.unwrap();
+    let task = agents.actors().unwrap().task(task).await.unwrap();
+    let run = engine.status(task.run_id.unwrap()).await.unwrap();
+    assert_eq!(
+        run.activities()[0].spec.input["target"]["policy"]["request_timeout_ms"],
+        250
+    );
+    assert_eq!(
+        run.activities()[0].spec.input["target"]["policy"]["connect_timeout_ms"],
+        250
+    );
+    assert_eq!(run.activities()[0].attempts, 2);
+    let Some(act0r::domain::Outcome::Failure(error)) = &run.attempts()[0].outcome else {
+        panic!("first request did not retain its timeout");
+    };
+    assert_eq!(error.code, "model_timeout");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_long_deadline_survives_restart_and_cannot_be_overridden_on_resume() {
+    let directory = tempfile::tempdir().unwrap();
+    let database = directory.path().join("pinned-deadline.db");
+    let provider = Provider::new(vec![
+        json!({"kind":"ask_human","question":"Continue?"}),
+        json!({"kind":"finish","summary":"Kept the saved deadline"}),
+    ])
+    .await;
+    let mut first = Running::start(
+        &database,
+        &[
+            "--model",
+            "deadline-fixture",
+            "--endpoint",
+            &provider.endpoint,
+            "--action-format",
+            "function-calling",
+            "--model-timeout-ms",
+            "300000",
+            "Ask before finishing",
+        ],
+        true,
+    );
+    let session = first.event("session").await["session_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let question = first.event("question").await;
+    let run_id = question["run_id"].as_str().unwrap().parse().unwrap();
+    drop(first);
+    let (engine, agents) = act0r::bootstrap::local_app(&database).await.unwrap();
+    let before = engine.status(run_id).await.unwrap();
+    assert_eq!(
+        before.activities()[0].spec.input["target"]["policy"]["request_timeout_ms"],
+        300000
+    );
+    assert_eq!(
+        before.activities()[0].spec.input["target"]["policy"]["connect_timeout_ms"],
+        10000
+    );
+    drop(agents);
+    drop(engine);
+    let refused = Command::new(env!("CARGO_BIN_EXE_act0r"))
+        .arg("--db")
+        .arg(&database)
+        .args(["chat", "--resume", &session, "--model-timeout-ms", "90000"])
+        .output()
+        .unwrap();
+    assert_eq!(refused.status.code(), Some(2));
+    let mut second = Running::start(&database, &["--resume", &session], true);
+    assert_eq!(
+        second.event("question").await["wait"]["id"],
+        question["wait"]["id"]
+    );
+    assert_eq!(provider.calls(), 1);
+    second.send("yes");
+    second
+        .event_where("response", |data| data["status"] == "succeeded")
+        .await;
+    second.send("/exit");
+    second.finish().await;
+    let (engine, _agents) = act0r::bootstrap::local_app(&database).await.unwrap();
+    let after = engine.status(run_id).await.unwrap();
+    assert_eq!(json!(before.activities()[0]), json!(after.activities()[0]));
+    assert!(
+        after
+            .activities()
+            .iter()
+            .all(|a| a.spec.input["target"]["policy"]["request_timeout_ms"] == 300000)
+    );
+    assert_eq!(provider.calls(), 2);
+}

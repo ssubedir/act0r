@@ -79,7 +79,15 @@ async fn local_app_with_read_tools(
     let replace_inspection = catalog.replace_inspection;
     let mcp_tools =
         crate::adapters::mcp::discover_tools(catalog, workspace_tools.clone(), &workspaces).await?;
-    let workspace_defaults = mcp_tools.iter().map(|tool| tool.definition().id).collect();
+    let (workspace_tools_ids, general_tools_ids): (Vec<_>, Vec<_>) = mcp_tools
+        .iter()
+        .map(|tool| tool.definition())
+        .partition(|tool| tool.requires_workspace);
+    let workspace_defaults = workspace_tools_ids
+        .into_iter()
+        .map(|tool| tool.id)
+        .collect();
+    let general_defaults = general_tools_ids.into_iter().map(|tool| tool.id).collect();
     let workspace_reader: Arc<dyn WorkspaceReader> = match mcp {
         Some(config) => Arc::new(crate::adapters::mcp::McpWorkspaceReader::new(
             workspace_tools.clone(),
@@ -135,6 +143,7 @@ async fn local_app_with_read_tools(
         .with_tools(additional_tools)?
         .with_tools(mcp_tools)?
         .with_workspace_defaults(workspace_defaults)?
+        .with_general_defaults(general_defaults)?
         .with_external_inspection(replace_inspection)?,
     );
     let registry = Arc::new(AgentRegistry::new(vec![

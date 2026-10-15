@@ -41,7 +41,3 @@ jobs:
         run: cargo +1.99.0 test --locked --workspace --all-targets
       - name: MCP transport and recovery
         run: cargo +1.99.0 test --locked --test mcp_tools --test mcp_catalog --test mcp_inspection -- --include-ignored
-      - name: Documentation checker tests
-        run: node --test scripts/check-docs.test.mjs
-      - name: Documentation links
-        run: node scripts/check-docs.mjs

@@ -6,6 +6,8 @@ use std::{
 
 #[path = "cli/chat.rs"]
 mod chat;
+#[path = "cli/doctor.rs"]
+mod doctor;
 
 fn cli(database: &Path, arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_act0r"))

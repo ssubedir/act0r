@@ -16,6 +16,10 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+#[path = "mcp_catalog/actions.rs"]
+mod actions;
+#[path = "mcp_catalog/general.rs"]
+mod general;
 
 const INFO: &str = "mcp_files_get_file_info";
 fn node() -> PathBuf {

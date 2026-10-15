@@ -31,10 +31,10 @@ pub(super) struct ChatOptions {
     #[arg(long, conflicts_with_all = ["resume", "list"])]
     project: Option<PathBuf>,
     /// Restore a saved conversation, including its original model and project settings.
-    #[arg(long, conflicts_with_all = ["model", "endpoint", "action_format", "list"])]
+    #[arg(long, conflicts_with_all = ["model", "endpoint", "action_format", "model_timeout_ms", "list"])]
     resume: Option<SessionId>,
     /// Show saved conversations without starting a worker or making model calls.
-    #[arg(long, conflicts_with_all = ["prompt", "model", "endpoint", "action_format"])]
+    #[arg(long, conflicts_with_all = ["prompt", "model", "endpoint", "action_format", "model_timeout_ms"])]
     list: bool,
     /// Model name for a new session; otherwise use ACT0R_MODEL or the harness default.
     #[arg(long)]
@@ -45,14 +45,50 @@ pub(super) struct ChatOptions {
     /// Override the new session's structured action format.
     #[arg(long, value_enum)]
     action_format: Option<ActionFormat>,
+    /// Request deadline for a new session, in milliseconds (default 90000).
+    #[arg(long, value_parser = clap::value_parser!(u32).range(1..=600_000))]
+    model_timeout_ms: Option<u32>,
     /// First request, or a reply/follow-up when resuming; otherwise read from stdin.
     prompt: Option<String>,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
-enum ActionFormat {
+pub(super) enum ActionFormat {
     JsonSchema,
     FunctionCalling,
+}
+
+pub(super) fn model_target(
+    model: Option<&str>,
+    endpoint: Option<&str>,
+    format: Option<ActionFormat>,
+    timeout_ms: Option<u32>,
+) -> Result<ModelTarget, Error> {
+    let mut target: ModelTarget =
+        serde_json::from_value(operator::harness_model_target(model, endpoint))?;
+    if let Some(format) = format {
+        target.action_format = match format {
+            ActionFormat::JsonSchema => ModelActionFormat::JsonSchema,
+            ActionFormat::FunctionCalling => ModelActionFormat::FunctionCalling,
+        };
+    }
+    if let Some(timeout_ms) = timeout_ms {
+        target.policy.request_timeout_ms = timeout_ms;
+        target.policy.connect_timeout_ms = target.policy.connect_timeout_ms.min(timeout_ms);
+    }
+    Ok(target)
+}
+
+pub(super) fn validate_database_project(database: &Path, project: &Path) -> Result<(), Error> {
+    if let Ok(relative) = database.strip_prefix(project)
+        && !relative.components().any(|component| {
+            let name = component.as_os_str().to_string_lossy();
+            name.eq_ignore_ascii_case(".act0r") || name.eq_ignore_ascii_case(".build")
+        })
+    {
+        return Err(Error::Unavailable("keep --db outside the project or under .act0r/ so runtime state is excluded from project inspection".into()));
+    }
+    Ok(())
 }
 
 struct Output {
@@ -621,29 +657,18 @@ async fn interact(
                 if !path.is_dir() {
                     return Err(Error::Unavailable("project must be a directory".into()));
                 }
-                if let Ok(relative) = database.strip_prefix(&path)
-                    && !relative.components().any(|component| {
-                        let name = component.as_os_str().to_string_lossy();
-                        name.eq_ignore_ascii_case(".act0r") || name.eq_ignore_ascii_case(".build")
-                    })
-                {
-                    return Err(Error::Unavailable("keep --db outside the project or under .act0r/ so runtime state is excluded from project inspection".into()));
-                }
+                validate_database_project(database, &path)?;
                 path.into_os_string()
                     .into_string()
                     .map_err(|_| Error::Unavailable("project path must be UTF-8".into()))
             })
             .transpose()?;
-        let mut target: ModelTarget = serde_json::from_value(operator::harness_model_target(
+        let target = model_target(
             options.model.as_deref(),
             options.endpoint.as_deref(),
-        ))?;
-        if let Some(format) = options.action_format {
-            target.action_format = match format {
-                ActionFormat::JsonSchema => ModelActionFormat::JsonSchema,
-                ActionFormat::FunctionCalling => ModelActionFormat::FunctionCalling,
-            };
-        }
+            options.action_format,
+            options.model_timeout_ms,
+        )?;
         output.note("Enter a request. Project work discovers its setup automatically.")?;
         let prompt = loop {
             let line = match supplied.take() {

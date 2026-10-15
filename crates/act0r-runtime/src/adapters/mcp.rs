@@ -1,4 +1,4 @@
-//! Read-only MCP filesystem adapter behind the existing workspace inspection port.
+//! Configured MCP tools and a compatibility filesystem inspection adapter.
 //! The engine journals the tool activity; this adapter owns only its local server process.
 use super::{
     process_tree::ProcessTree,

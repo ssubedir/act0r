@@ -2,6 +2,8 @@
 
 Native function calling, structured actions, timeouts and provider retries.
 
+[`act0r doctor`](harness.md#doctor) reports the resolved new-chat model, endpoint, action format and API-key presence without making a model request. It can diagnose local configuration errors; it does not test endpoint availability, key validity or model capabilities.
+
 - [Native model function calling](#model-function-calling)
 - [Model-provider reliability](#provider-reliability)
 
@@ -24,6 +26,8 @@ CLI actor and HTTP harness configurations can opt in through the saved target:
 ```
 
 The existing timeout and retry settings in `target.policy` remain available. Set `OPENAI_API_KEY` in the worker environment for compatible hosted endpoints, including NVIDIA. Credentials stay in the HTTP adapter and are omitted from saved request exports.
+
+Chat defaults to a 90-second request deadline. For a slower endpoint, start a new session with `act0r chat --model-timeout-ms 300000 "Your request"`. The option accepts 1–600000 milliseconds and applies to each model attempt, including receipt of its response body. `act0r doctor --model-timeout-ms 300000` reports the same new-session setting without contacting the provider. Sessions retain their pinned deadline across restart and follow-ups; `--resume` refuses timeout overrides, and `/retry` preserves the failed request's original policy. Actor and HTTP callers can set `target.policy.request_timeout_ms` directly.
 
 <a id="model-function-calling--saved-contract-and-execution"></a>
 

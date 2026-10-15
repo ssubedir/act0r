@@ -1,4 +1,4 @@
-use act0r::adapters::cli::{Cli, execute};
+use act0r::adapters::cli::{Cli, run};
 use clap::Parser;
 use std::process::ExitCode;
 
@@ -11,18 +11,7 @@ async fn main() -> ExitCode {
         .with_writer(std::io::stderr)
         .init();
     let cli = Cli::parse();
-    let result = async {
-        if let Some(parent) = cli
-            .database()
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-        {
-            std::fs::create_dir_all(parent)?;
-        }
-        let (engine, agents) = act0r::bootstrap::local_app(cli.database()).await?;
-        execute(cli, engine, agents).await
-    }
-    .await;
+    let result = run(cli).await;
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {

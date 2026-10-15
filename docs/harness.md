@@ -3,6 +3,7 @@
 Start with the CLI, then use these sections for harness service/API contracts, project setup, saved sessions and verification. Dated browser trials below record historical validation from before the UI was removed.
 
 - [Run from the CLI](#cli)
+- [Check local setup](#doctor)
 - [Chat with the harness](#chat)
 - [Automatic project work](#automatic-project-work)
 - [Continuous Auto conversations](#continuous-conversations)
@@ -29,9 +30,31 @@ cargo run --locked -- actor --help
 cargo run --locked -- team --help
 ```
 
-Chat defaults to `.act0r/chat.db`; other commands default to `act0r.db`. Use global `--db PATH` to select another database; missing parent directories are created. Global `--json` exposes structured results for scripts. Credentials come from the launching environment; set `OPENAI_API_KEY` for hosted compatible model targets. Loopback model servers can run without authentication. Chat takes model flags or environment defaults; actor/team model targets and tool policies live in JSON configuration. See [models](providers.md) and [MCP setup](mcp.md).
+Chat and doctor default to `.act0r/chat.db`; other commands default to `act0r.db`. Use global `--db PATH` to select another database; normal execution creates missing parent directories, while doctor only checks access. Global `--json` exposes structured results for scripts. Credentials come from the launching environment; set `OPENAI_API_KEY` for hosted compatible model targets. Loopback model servers can run without authentication. Chat takes model flags or environment defaults; actor/team model targets and tool policies live in JSON configuration. See [models](providers.md) and [MCP setup](mcp.md).
 
 The built executable is `target/debug/act0r` on Unix and `target/debug/act0r.exe` on Windows. No frontend build or JavaScript launcher is required. Node is needed only for Node-based tools, fixtures and docs checks.
+
+<a id="doctor"></a>
+
+### Check local setup
+
+Run `act0r doctor` before a new chat or when startup fails. An optional `--project` checks a project directory and database placement:
+
+```sh
+act0r doctor --project ./my-project
+act0r --db .act0r/chat.db --json doctor --project .
+act0r doctor --model YOUR_LOCAL_MODEL --endpoint http://127.0.0.1:1234/v1/chat/completions --action-format function-calling
+```
+
+Doctor shares new chat's model resolution: explicit `--model`, `--endpoint` and `--action-format`, then `ACT0R_MODEL` / `ACT0R_MODEL_ENDPOINT`, then the harness defaults. The tested NVIDIA Kimi default selects native function calling. The endpoint must be a full compatible URL using HTTPS, or HTTP on loopback, without embedded credentials, query parameters or fragments. Hosted endpoints require a nonblank `OPENAI_API_KEY`; loopback endpoints allow it to be absent. Only presence is reported; key values and rejected endpoint strings are not displayed.
+
+Both chat and doctor accept `--model-timeout-ms` for new sessions (1–600000 milliseconds; default 90000). Doctor reports the resolved deadline. A longer deadline can accommodate slower completions; it does not change retry counts or guarantee a provider response. Resuming a saved session retains its original deadline and rejects this override.
+
+The report checks project directory readability, database file read/write access, writable database parents and the managed workspace location. It uses temporary files in existing directories to probe effective write access, then removes them. It does not write project files, create missing runtime directories, open or initialize SQLite, acquire worker ownership, or alter saved work. Keep the database outside the project or under `.act0r/` or `.build/`, as required by chat. Project source only needs to be readable; edits run in a managed copy.
+
+MCP checks use the same adjacent `mcp.json` or `ACT0R_MCP_CONFIG` override as startup, including the existing configuration limits and read-only tool policies. Configured executable files must exist; on Unix they also need execute permission. The optional `ACT0R_MCP_FILESYSTEM_CONFIG` compatibility bridge is checked when set. Missing optional MCP configuration is valid and retains built-in inspection. No executable, MCP server or model endpoint is contacted.
+
+Human output lists checks and fixes. Global `--json` prints one report with `ready`, `scope: "local_configuration"`, resolved model details and `checks` containing `name`, `status`, `message`, optional `path` and optional `fix`. Exit status is zero when all local checks pass and nonzero on errors. Independent checks continue after a failure. Readiness describes local configuration only: it does not verify model availability, authentication validity, response-format compatibility, MCP server handshakes/tool schemas, database schema/locks, all project files, or project build/test dependencies. Saved sessions retain their own model and tool pins; doctor checks the setup for a new chat.
 
 <a id="chat"></a>
 

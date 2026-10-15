@@ -4,6 +4,7 @@ use crate::domain::{Failure, RecoveryPolicy};
 use rmcp::{model::Tool, service::ServiceError};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -27,8 +28,15 @@ pub struct McpServerConfig {
 #[serde(deny_unknown_fields)]
 pub struct McpToolPolicy {
     pub name: String,
-    /// Explicit host assertion. Server annotations never grant repeat safety.
+    /// Explicit host assertion. False selects approval-gated service actions.
+    /// Server annotations never grant repeat safety or approval.
     pub read_only: bool,
+    /// Project access is required unless the host explicitly opts out for this tool.
+    #[serde(
+        default = "workspace_required",
+        skip_serializing_if = "workspace_is_required"
+    )]
+    pub requires_workspace: bool,
     #[serde(default)]
     pub path_parameters: Vec<String>,
     /// Existing relative directories, including "." for the project root.
@@ -36,6 +44,12 @@ pub struct McpToolPolicy {
     pub directory_parameters: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub alias: Option<String>,
+}
+fn workspace_required() -> bool {
+    true
+}
+fn workspace_is_required(required: &bool) -> bool {
+    *required
 }
 fn invalid(message: &str) -> Error {
     Error::Unavailable(message.into())
@@ -54,14 +68,23 @@ impl McpConfig {
         };
         Self::load(Path::new(&path))
     }
-    pub(crate) fn for_database(database: &Path) -> Result<Self, Error> {
+    /// Resolve the same host configuration path for startup and local diagnostics.
+    pub fn configuration_path(database: &Path) -> PathBuf {
+        std::env::var_os("ACT0R_MCP_CONFIG")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                database
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join("mcp.json")
+            })
+    }
+    /// Load and validate local configuration without starting server processes.
+    pub fn for_database(database: &Path) -> Result<Self, Error> {
         if std::env::var_os("ACT0R_MCP_CONFIG").is_some() {
             return Self::from_environment();
         }
-        let path = database
-            .parent()
-            .unwrap_or_else(|| Path::new("."))
-            .join("mcp.json");
+        let path = Self::configuration_path(database);
         match fs::symlink_metadata(&path) {
             Ok(_) => Self::load(&path),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(Self::default()),
@@ -80,6 +103,17 @@ impl McpConfig {
         if self.replace_inspection && self.servers.is_empty() {
             return Err(invalid(
                 "MCP inspection requires at least one configured server",
+            ));
+        }
+        if self.replace_inspection
+            && !self
+                .servers
+                .iter()
+                .flat_map(|server| &server.tools)
+                .any(|tool| tool.requires_workspace)
+        {
+            return Err(invalid(
+                "MCP inspection replacement requires at least one workspace tool",
             ));
         }
         if self.servers.len() > 4 || self.servers.iter().map(|s| s.tools.len()).sum::<usize>() > 8 {
@@ -111,9 +145,21 @@ impl McpConfig {
             }
             let mut tools = HashSet::new();
             for policy in &server.tools {
+                if !policy.read_only && policy.requires_workspace {
+                    return Err(invalid(
+                        "MCP actions require requires_workspace:false; project mutations use the native workspace tools",
+                    ));
+                }
+                if !policy.requires_workspace
+                    && (!policy.path_parameters.is_empty()
+                        || !policy.directory_parameters.is_empty())
+                {
+                    return Err(invalid(
+                        "MCP tools without a workspace cannot declare scoped file or directory parameters",
+                    ));
+                }
                 let alias = policy.alias(server);
-                if !policy.read_only
-                    || policy.name.is_empty()
+                if policy.name.is_empty()
                     || policy.name.len() > 128
                     || !tools.insert(&policy.name)
                     || !valid_name(&alias)
@@ -129,7 +175,7 @@ impl McpConfig {
                         != policy.path_parameters.len() + policy.directory_parameters.len()
                 {
                     return Err(invalid(
-                        "MCP tools need distinct names/aliases and an explicit read_only:true host policy",
+                        "MCP tools need distinct names/aliases and an explicit read_only host policy",
                     ));
                 }
             }
@@ -198,22 +244,41 @@ impl McpServerConfig {
             .as_deref()
             .filter(|s| !s.trim().is_empty())
             .unwrap_or(&policy.name);
-        let mut description = format!(
-            "{description}\nReturns saved MCP content and structuredContent with an ok flag. Configured file path arguments {:?} must use relative project file paths; the runtime supplies the managed root.",
-            policy.path_parameters
-        );
+        let mut description = if policy.requires_workspace {
+            format!(
+                "{description}\nReturns saved MCP content and structuredContent with an ok flag. Configured file path arguments {:?} must use relative project file paths; the runtime supplies the managed root.",
+                policy.path_parameters
+            )
+        } else {
+            format!(
+                "{description}\nReturns saved MCP content and structuredContent with an ok flag. Runs without project context in an empty temporary working directory."
+            )
+        };
         if !policy.directory_parameters.is_empty() {
             description.push_str(&format!(" Directory arguments {:?} use relative project directories, or . for the root. The server inspects a temporary project snapshot excluding private/generated files and links. Returned absolute paths refer to that temporary snapshot; use relative paths in subsequent calls.", policy.directory_parameters));
         }
-        Ok(
-            ToolDefinition::builder(policy.alias(self), 1, RecoveryPolicy::SafeToRepeat)
-                .description(description)
-                .external_contract(contract)
-                .requires_workspace(true)
-                .reports_errors(true)
-                .byte_limits(32_768, 65_536)
-                .build()?,
+        if !policy.read_only {
+            description = format!(
+                "MCP action {}/{}: {description}\nRequires human approval for each call. An unknown or failed response after dispatch requires reconciliation before retrying.",
+                self.name, policy.name
+            );
+        }
+        Ok(ToolDefinition::builder(
+            policy.alias(self),
+            1,
+            if policy.read_only {
+                RecoveryPolicy::SafeToRepeat
+            } else {
+                RecoveryPolicy::RequiresReconciliation
+            },
         )
+        .description(description)
+        .external_contract(contract)
+        .requires_approval(!policy.read_only)
+        .requires_workspace(policy.requires_workspace)
+        .reports_errors(true)
+        .byte_limits(32_768, 65_536)
+        .build()?)
     }
 }
 async fn catalog(session: &Session) -> Result<Vec<Tool>, Error> {
@@ -282,6 +347,7 @@ pub async fn discover_tools(
                 policy: policy.clone(),
                 definition,
                 local: local.clone(),
+                scratch_root: root_path.parent().unwrap().to_path_buf(),
             }));
         }
     }
@@ -292,6 +358,7 @@ struct McpNativeTool {
     policy: McpToolPolicy,
     definition: ToolDefinition,
     local: Arc<LocalTools>,
+    scratch_root: PathBuf,
 }
 /// Windows can retain the server's working-directory handle briefly after its job
 /// is killed. Retry disposal outside the cancelled activity without holding a worker.
@@ -322,10 +389,11 @@ impl InspectionView {
                 }
             }
         }
-        let directory = tempfile::Builder::new()
-            .prefix("mcp-inspection-")
-            .tempdir_in(&parent)?;
-        if !directory.path().is_absolute() || directory.path().parent() != Some(parent.as_path()) {
+        Self::create(&parent, "mcp-inspection-")
+    }
+    fn create(parent: &Path, prefix: &str) -> Result<Self, Error> {
+        let directory = tempfile::Builder::new().prefix(prefix).tempdir_in(parent)?;
+        if !directory.path().is_absolute() || directory.path().parent() != Some(parent) {
             return Err(invalid(
                 "MCP inspection view must stay in the private workspace directory",
             ));
@@ -361,15 +429,21 @@ impl Drop for InspectionView {
     }
 }
 impl McpNativeTool {
-    async fn invoke(&self, call: NativeToolCall) -> Result<Value, Error> {
+    async fn invoke(&self, call: NativeToolCall, dispatched: &AtomicBool) -> Result<Value, Error> {
+        let contract = self.definition.external.as_ref().unwrap();
+        let mut arguments = contract.arguments(&call.arguments);
+        if !self.policy.requires_workspace {
+            let directory = InspectionView::create(&self.scratch_root, "mcp-general-")?;
+            return self
+                .invoke_in(directory.path(), arguments, dispatched)
+                .await;
+        }
         let workspace = self.local.workspace(
             call.workspace
                 .as_deref()
                 .ok_or_else(|| invalid("MCP tool requires a pinned managed workspace"))?,
         )?;
         let _lock = self.local.lock(&workspace)?;
-        let contract = self.definition.external.as_ref().unwrap();
-        let mut arguments = contract.arguments(&call.arguments);
         let path_count: usize = self
             .policy
             .path_parameters
@@ -460,6 +534,15 @@ impl McpNativeTool {
         let root = view
             .as_ref()
             .map_or(workspace.as_path(), |view| view.path());
+        self.invoke_in(root, arguments, dispatched).await
+    }
+    async fn invoke_in(
+        &self,
+        root: &Path,
+        arguments: Value,
+        dispatched: &AtomicBool,
+    ) -> Result<Value, Error> {
+        let contract = self.definition.external.as_ref().unwrap();
         let mut session = self.server.connect(root).await?;
         let outcome = async {
             let tools = catalog(&session).await?;
@@ -474,6 +557,9 @@ impl McpNativeTool {
                     "restore the exact pinned MCP tool contract before retrying",
                 ));
             }
+            // From this boundary onward, loss of a response cannot establish that
+            // an action had no effect. Never turn it into an automatic retry.
+            dispatched.store(true, Ordering::Relaxed);
             let result = session
                 .client
                 .call_tool(
@@ -487,6 +573,11 @@ impl McpNativeTool {
                     }
                     _ => disconnected(),
                 })?;
+            if !self.policy.read_only && result.is_error == Some(true) {
+                return Err(invalid(
+                    "MCP action reported an error; inspect the service for partial effects",
+                ));
+            }
             if result
                 .content
                 .iter()
@@ -501,6 +592,13 @@ impl McpNativeTool {
             }
             let mut saved = serde_json::to_value(&result)?;
             saved["ok"] = json!(result.is_error != Some(true));
+            if !self.policy.read_only
+                && saved.to_string().len() > self.definition.max_output_bytes as usize
+            {
+                return Err(invalid(
+                    "MCP action result exceeded its pinned output limit",
+                ));
+            }
             Ok(saved)
         }
         .await;
@@ -543,12 +641,22 @@ impl NativeTool for McpNativeTool {
     fn execute(&self, call: NativeToolCall) -> PortFuture<'_, NativeToolResult> {
         Box::pin(async move {
             self.definition.validate_arguments(&call.arguments)?;
+            let dispatched = AtomicBool::new(false);
             let outcome = tokio::time::timeout(
                 Duration::from_millis(self.server.command.timeout_ms),
-                self.invoke(call),
+                self.invoke(call, &dispatched),
             )
             .await;
-            Ok(match outcome.unwrap_or_else(|_| Err(timeout_error())) {
+            let outcome = outcome.unwrap_or_else(|_| Err(timeout_error()));
+            if !self.policy.read_only
+                && dispatched.load(Ordering::Relaxed)
+                && let Err(error) = &outcome
+            {
+                return Ok(NativeToolResult::Uncertain(format!(
+                    "MCP action outcome requires inspection before retry: {error}"
+                )));
+            }
+            Ok(match outcome {
                 Ok(result) => NativeToolResult::Success(result),
                 Err(Error::ToolRejected(error)) => NativeToolResult::Rejected(error),
                 Err(Error::Ownership(_)) => NativeToolResult::Failure(Failure::new(

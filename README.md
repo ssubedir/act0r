@@ -70,15 +70,18 @@ cargo build --locked
 cargo run --locked -- --help
 ```
 
-The first build may download Cargo dependencies. Set `OPENAI_API_KEY` for a hosted compatible model, then start a conversation:
+The first build may download Cargo dependencies. Set `OPENAI_API_KEY` for a hosted compatible model, check your setup, then start a conversation:
 
 ```sh
+cargo run --locked -- doctor --project ./my-project
 cargo run --locked -- chat --project ./my-project
 # An optional first request can be supplied directly:
 cargo run --locked -- chat --project ./my-project "Fix the failing tests"
 # Restore the model, project, conversation and pending decisions from SQLite:
 cargo run --locked -- chat --resume SESSION_ID
 ```
+
+`doctor` checks the resolved model and endpoint, key presence, MCP configuration/executables, project access and database/workspace permissions. It reports fixes without model requests, MCP processes or opening SQLite. Use `--json` for a structured report; exit status is nonzero when a check fails. See [setup diagnostics](docs/harness.md#doctor) for details and limits.
 
 Omit `--project` for a general conversation. The harness automatically handles project discovery and routine scoped work in its managed copy. Answer questions normally; `/steer MESSAGE` saves guidance for the current task's next fresh model request. `/patch` shows saved changes and `/apply` prepares their reviewed application to the original folder. `/exit` or Ctrl+C leaves work saved. Use `chat --list` to find sessions. See the [chat CLI guide](docs/harness.md#chat) for models, controls and piped input.
 
@@ -99,7 +102,7 @@ cargo run --locked -- team task status "$team" "$task"
 
 The sample uses fixed responses to demonstrate delegation and message handling. For PowerShell commands, see the [CLI guide](docs/harness.md#cli).
 
-Chat defaults to `.act0r/chat.db` in the current directory, keeping runtime state out of project inspection. Other commands default to `act0r.db`; use `--db PATH` to select the chat database for lower-level inspection or choose another database. The printed resume command includes its absolute database path. Ctrl+C drains the worker; restart against the same database to resume saved work. Use global `--json` for machine-readable output.
+Chat and doctor default to `.act0r/chat.db` in the current directory, keeping runtime state out of project inspection. Other commands default to `act0r.db`; use `--db PATH` to select the chat database for lower-level inspection or choose another database. The printed resume command includes its absolute database path. Ctrl+C drains the worker; restart against the same database to resume saved work. Use global `--json` for machine-readable output.
 
 For live compatible models, including NVIDIA, set `OPENAI_API_KEY` in the worker environment and configure the model target in JSON. Loopback servers such as LM Studio can run without a key. See the [CLI guide](docs/harness.md#cli), [team configuration](docs/teams.md#agent-teams--configuration), [model providers](docs/providers.md) and [MCP setup](docs/mcp.md).
 

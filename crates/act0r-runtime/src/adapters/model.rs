@@ -70,6 +70,23 @@ impl ModelRouter {
     pub fn environment_key_available() -> bool {
         environment_key().is_some()
     }
+    /// Validate transport URL rules without creating a client or making a request.
+    /// The result identifies loopback targets, which do not require a key.
+    pub fn validate_endpoint(endpoint: &str) -> Result<bool, &'static str> {
+        let url = reqwest::Url::parse(endpoint).map_err(|_| "invalid model endpoint")?;
+        let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+        if !(url.scheme() == "https" || (local && url.scheme() == "http"))
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return Err(
+                "endpoint must use HTTPS (HTTP allowed on loopback) without embedded credentials or query parameters",
+            );
+        }
+        Ok(local)
+    }
     pub fn new(key: Option<String>) -> Result<Self, Error> {
         let client = Self::client(45_000)?;
         Ok(Self {
@@ -127,30 +144,18 @@ impl ModelRouter {
                 None,
             );
         }
-        let Ok(url) = reqwest::Url::parse(&request.target.endpoint) else {
-            return RawReply::fail(
-                diagnostics,
-                RequestCategory::Configuration,
-                "invalid model endpoint",
-                false,
-                None,
-            );
+        let local = match Self::validate_endpoint(&request.target.endpoint) {
+            Ok(local) => local,
+            Err(message) => {
+                return RawReply::fail(
+                    diagnostics,
+                    RequestCategory::Configuration,
+                    message,
+                    false,
+                    None,
+                );
+            }
         };
-        let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
-        if !(url.scheme() == "https" || (local && url.scheme() == "http"))
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.query().is_some()
-            || url.fragment().is_some()
-        {
-            return RawReply::fail(
-                diagnostics,
-                RequestCategory::Configuration,
-                "endpoint must use HTTPS (HTTP allowed on loopback) without embedded credentials or query parameters",
-                false,
-                None,
-            );
-        }
         let key = self.key.as_deref();
         if !local && key.is_none() {
             return RawReply::fail(
@@ -176,7 +181,7 @@ impl ModelRouter {
             }
         };
         let mut builder = client
-            .post(url)
+            .post(&request.target.endpoint)
             .timeout(Duration::from_millis(u64::from(
                 request.target.policy.request_timeout_ms,
             )))

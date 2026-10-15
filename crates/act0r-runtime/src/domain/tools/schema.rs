@@ -15,7 +15,6 @@ impl ExternalToolContract {
     pub fn validate(&self) -> Result<(), DomainError> {
         if self.binding.is_empty()
             || self.binding.len() > 256
-            || !self.read_only
             || self.input_schema["type"] != "object"
             || self.input_schema.get("properties").is_some_and(|p| {
                 p.as_object()

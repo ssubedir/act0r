@@ -10,6 +10,7 @@ struct RegisteredTool {
 pub struct ToolRegistry {
     tools: HashMap<DefinitionId, RegisteredTool>,
     workspace_defaults: Vec<DefinitionId>,
+    general_defaults: Vec<DefinitionId>,
     external_inspection: bool,
 }
 impl ToolRegistry {
@@ -36,6 +37,7 @@ impl ToolRegistry {
         Ok(Self {
             tools: registry,
             workspace_defaults: vec![],
+            general_defaults: vec![],
             external_inspection: false,
         })
     }
@@ -67,6 +69,29 @@ impl ToolRegistry {
             });
         }
         for id in &self.workspace_defaults {
+            if !tools.contains(id) {
+                tools.push(id.clone());
+            }
+        }
+    }
+    /// Host-approved tools usable by fresh tool/planner actors with or without a project.
+    pub fn with_general_defaults(mut self, ids: Vec<DefinitionId>) -> Result<Self, Error> {
+        if ids.len() > 8 {
+            return Err(Error::Unavailable(
+                "at most eight general tool defaults are supported".into(),
+            ));
+        }
+        for id in &ids {
+            let tool = self.definition(id)?;
+            if tool.external.is_none() || tool.requires_workspace {
+                return Err(Error::Unavailable("general tool defaults must be host-selected external tools without workspace requirements".into()));
+            }
+        }
+        self.general_defaults = ids;
+        Ok(self)
+    }
+    pub fn pin_general_defaults(&self, tools: &mut Vec<DefinitionId>) {
+        for id in &self.general_defaults {
             if !tools.contains(id) {
                 tools.push(id.clone());
             }
@@ -225,6 +250,7 @@ impl ToolRegistry {
                 }
             }
             NativeToolResult::Failure(failure) => return Ok(Outcome::Failure(failure)),
+            NativeToolResult::Uncertain(reason) => return Ok(Outcome::Uncertain(reason)),
         };
         Ok(
             if result.to_string().len() <= tool.definition.max_output_bytes as usize {
