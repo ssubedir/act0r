@@ -27,6 +27,7 @@ use tokio::{
 
 mod catalog;
 mod http;
+pub(crate) use catalog::discover_available_tools;
 pub use catalog::{McpConfig, McpServerConfig, McpToolPolicy, discover_tools};
 pub use http::McpHttpConfig;
 
@@ -45,8 +46,14 @@ fn default_timeout() -> u64 {
 }
 impl McpFilesystemConfig {
     pub fn validate(&self) -> Result<(), Error> {
+        self.validate_configuration()?;
+        if !self.program.is_file() {
+            return Err(Error::Unavailable("MCP executable is not installed".into()));
+        }
+        Ok(())
+    }
+    fn validate_configuration(&self) -> Result<(), Error> {
         if !self.program.is_absolute()
-            || !self.program.is_file()
             || self.args.len() > 16
             || self.args.iter().any(|s| s.len() > 4096 || s.contains('\0'))
             || !(1..=60_000).contains(&self.timeout_ms)

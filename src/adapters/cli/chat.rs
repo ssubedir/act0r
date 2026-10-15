@@ -127,6 +127,12 @@ pub(super) async fn execute(
 ) -> Result<(), Error> {
     let database = std::fs::canonicalize(database)?;
     let output = Output::new(json_output);
+    for tool in agents.unavailable_tools() {
+        output.emit("tool_unavailable", json!(tool), &format!(
+            "MCP server {} is unavailable or incompatible ({}). Saved work remains available. Restore its configured connection and exact tool contracts, then restart act0r.",
+            tool.server, tool.id.name
+        ))?;
+    }
     if options.list {
         let sessions = agents
             .teams()?
@@ -661,12 +667,15 @@ async fn interact(
     let mut supplied = options.prompt.take();
     let session = if let Some(session) = options.resume {
         // Verify the saved scope before consuming a supplied reply or admitting anything.
-        agents
-            .teams()?
-            .harness()?
-            .continuous_conversation(session, None, None)
-            .await?
-            .session_id
+        let harness = agents.teams()?.harness()?;
+        let conversation = harness.continuous_conversation(session, None, None).await?;
+        harness
+            .restore_tool_implementations(
+                conversation.active.session_id,
+                conversation.active.task_id,
+            )
+            .await?;
+        conversation.session_id
     } else {
         let workspace = options
             .project

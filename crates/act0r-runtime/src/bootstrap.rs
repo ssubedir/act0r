@@ -77,8 +77,12 @@ async fn local_app_with_read_tools(
     let workspace_factory = Arc::new(LocalWorkspaces::new(workspaces.clone()));
     let workspace_tools = Arc::new(LocalTools::new(workspaces.clone()));
     let replace_inspection = catalog.replace_inspection;
-    let mcp_tools =
-        crate::adapters::mcp::discover_tools(catalog, workspace_tools.clone(), &workspaces).await?;
+    let (mcp_tools, unavailable_tools) = crate::adapters::mcp::discover_available_tools(
+        catalog,
+        workspace_tools.clone(),
+        &workspaces,
+    )
+    .await?;
     let (workspace_tools_ids, general_tools_ids): (Vec<_>, Vec<_>) = mcp_tools
         .iter()
         .map(|tool| tool.definition())
@@ -142,6 +146,7 @@ async fn local_app_with_read_tools(
         ])?
         .with_tools(additional_tools)?
         .with_tools(mcp_tools)?
+        .with_unavailable_tools(unavailable_tools)?
         .with_workspace_defaults(workspace_defaults)?
         .with_general_defaults(general_defaults)?
         .with_external_inspection(replace_inspection)?,

@@ -309,6 +309,68 @@ impl HarnessService<'_> {
         }
         Ok(super::ToolRecoveries { items, truncated })
     }
+    /// Reopening a conversation may restore missing implementations, but must not
+    /// clear pauses, change pins, or resolve an uncertain external action.
+    pub async fn restore_tool_implementations(
+        &self,
+        session: SessionId,
+        turn: MessageId,
+    ) -> Result<(), Error> {
+        if self
+            .reader
+            .harness_turn_context(session, turn)
+            .await?
+            .cancelled
+        {
+            return Ok(());
+        }
+        let (runs, _) = self.reader.harness_tool_runs(session, turn).await?;
+        for (_, run) in runs {
+            if run
+                .record()
+                .error
+                .as_ref()
+                .is_none_or(|error| error.code != "implementation_unavailable")
+            {
+                continue;
+            }
+            let engine = self.engine.clone();
+            let now = engine.clock.now_ms();
+            self.engine
+                .store
+                .mutate(
+                    run.record().id,
+                    Box::new(move |run| {
+                        if run.record().status == RunStatus::Blocked
+                            && !run.record().controls.cancel_requested
+                            && run
+                                .record()
+                                .error
+                                .as_ref()
+                                .is_some_and(|error| error.code == "implementation_unavailable")
+                            && engine.incompatibility(run).is_none()
+                        {
+                            run.restore_implementation(now)?;
+                        }
+                        Ok(None)
+                    }),
+                )
+                .await?;
+        }
+        let actors = self.actors()?;
+        let task = actors.inspect_task(turn, Default::default()).await?;
+        let mut restored = std::collections::HashSet::new();
+        for node in task.nodes {
+            if node
+                .actor
+                .is_some_and(|actor| actor.status == actors::AgentStatus::Blocked)
+                && restored.insert(node.actor_id)
+            {
+                actors.restore_tool_implementation(node.actor_id).await?;
+            }
+        }
+        Ok(())
+    }
     pub async fn reconcile_tool(
         &self,
         session: SessionId,

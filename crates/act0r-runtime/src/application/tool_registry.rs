@@ -2,6 +2,13 @@ use super::{Error, ports::*};
 use crate::domain::{tools::*, *};
 use std::{collections::HashMap, sync::Arc};
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct UnavailableTool {
+    pub id: DefinitionId,
+    pub server: String,
+    pub requires_workspace: bool,
+}
+
 struct RegisteredTool {
     definition: ToolDefinition,
     implementation: Arc<dyn NativeTool>,
@@ -12,6 +19,7 @@ pub struct ToolRegistry {
     workspace_defaults: Vec<DefinitionId>,
     general_defaults: Vec<DefinitionId>,
     external_inspection: bool,
+    unavailable: Vec<UnavailableTool>,
 }
 impl ToolRegistry {
     pub fn new(tools: Vec<Arc<dyn NativeTool>>) -> Result<Self, Error> {
@@ -39,6 +47,7 @@ impl ToolRegistry {
             workspace_defaults: vec![],
             general_defaults: vec![],
             external_inspection: false,
+            unavailable: vec![],
         })
     }
     /// Host-approved read-only tools are pinned only into newly created workspace actors.
@@ -59,7 +68,8 @@ impl ToolRegistry {
         self.workspace_defaults = ids;
         Ok(self)
     }
-    pub fn pin_workspace_defaults(&self, tools: &mut Vec<DefinitionId>) {
+    pub fn pin_workspace_defaults(&self, tools: &mut Vec<DefinitionId>) -> Result<(), Error> {
+        self.check_default_availability(true)?;
         if self.external_inspection {
             tools.retain(|id| {
                 !matches!(
@@ -73,6 +83,7 @@ impl ToolRegistry {
                 tools.push(id.clone());
             }
         }
+        Ok(())
     }
     /// Host-approved tools usable by fresh tool/planner actors with or without a project.
     pub fn with_general_defaults(mut self, ids: Vec<DefinitionId>) -> Result<Self, Error> {
@@ -90,17 +101,53 @@ impl ToolRegistry {
         self.general_defaults = ids;
         Ok(self)
     }
-    pub fn pin_general_defaults(&self, tools: &mut Vec<DefinitionId>) {
+    pub fn pin_general_defaults(&self, tools: &mut Vec<DefinitionId>) -> Result<(), Error> {
+        self.check_default_availability(false)?;
         for id in &self.general_defaults {
             if !tools.contains(id) {
                 tools.push(id.clone());
             }
         }
+        Ok(())
+    }
+    pub(crate) fn with_unavailable_tools(
+        mut self,
+        tools: Vec<UnavailableTool>,
+    ) -> Result<Self, Error> {
+        if tools.iter().any(|tool| self.tools.contains_key(&tool.id)) {
+            return Err(Error::Unavailable(
+                "duplicate native tool registration".into(),
+            ));
+        }
+        self.unavailable = tools;
+        Ok(self)
+    }
+    pub fn unavailable_tools(&self) -> &[UnavailableTool] {
+        &self.unavailable
+    }
+    fn unavailable_error(tool: &UnavailableTool) -> Error {
+        Error::Unavailable(format!(
+            "MCP server {} is unavailable or incompatible (tool {}); restore its configured connection and exact tool contracts, then restart act0r",
+            tool.server, tool.id.name
+        ))
+    }
+    fn check_default_availability(&self, workspace: bool) -> Result<(), Error> {
+        if let Some(tool) = self
+            .unavailable
+            .iter()
+            .find(|tool| tool.requires_workspace == workspace)
+        {
+            return Err(Self::unavailable_error(tool));
+        }
+        Ok(())
     }
     /// Fresh actors use the host's external inspection catalog directly. Existing
     /// registrations stay installed for exact recovery of previously pinned work.
     pub fn with_external_inspection(mut self, enabled: bool) -> Result<Self, Error> {
-        if enabled && self.workspace_defaults.is_empty() {
+        if enabled
+            && self.workspace_defaults.is_empty()
+            && !self.unavailable.iter().any(|tool| tool.requires_workspace)
+        {
             return Err(Error::Unavailable(
                 "external inspection requires configured workspace tools".into(),
             ));
@@ -131,6 +178,9 @@ impl ToolRegistry {
     }
     pub fn definition(&self, id: &DefinitionId) -> Result<&ToolDefinition, Error> {
         self.tools.get(id).map(|t| &t.definition).ok_or_else(|| {
+            if let Some(tool) = self.unavailable.iter().find(|tool| tool.id == *id) {
+                return Self::unavailable_error(tool);
+            }
             Error::Unavailable(format!(
                 "native tool {} v{} is not registered",
                 id.name, id.version

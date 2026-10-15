@@ -821,6 +821,14 @@ pub trait ActorStore: Send + Sync {
     fn notify_run_completion(&self, now: i64) -> PortFuture<'_, bool>;
     fn actor_work_pending(&self) -> PortFuture<'_, bool>;
     fn control_actor(&self, id: AgentId, paused: bool, now: i64) -> PortFuture<'_, ()>;
+    /// Restore a checked implementation only if the same actor revision remains
+    /// blocked; never override a concurrent pause or supervision decision.
+    fn restore_actor_implementation(
+        &self,
+        id: AgentId,
+        expected_revision: u64,
+        now: i64,
+    ) -> PortFuture<'_, ()>;
     /// Reset a supervision pause and enqueue a durable wakeup in the same transaction.
     fn recover_actor_supervision(&self, _id: AgentId, _now: i64) -> PortFuture<'_, ()> {
         Box::pin(async {

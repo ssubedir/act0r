@@ -222,6 +222,120 @@ fn execution_http(definition: &ToolDefinition) -> ActivityExecution {
     }
 }
 
+#[tokio::test]
+async fn unavailable_http_server_keeps_healthy_saved_actors_running_and_refuses_incomplete_new_defaults()
+ {
+    let root = tempfile::tempdir().unwrap();
+    let database = root.path().join("partial.db");
+    let healthy = Server::new(None, false).await;
+    let failing = Server::new(None, false).await;
+    failing
+        .state
+        .notification_status
+        .store(503, Ordering::SeqCst);
+    let mut healthy_config = healthy.config();
+    healthy_config.servers[0].name = "healthy".into();
+    let (engine, agents) = local_app_with_mcp_tools(&database, healthy_config.clone())
+        .await
+        .unwrap();
+    let mut input = config_actor(READ);
+    input["script"][0]["tool"] = json!("mcp_healthy_lookup");
+    let saved_actor = agents
+        .create_registered_actor(
+            DefinitionId::new("tool", 1),
+            None,
+            input.clone(),
+            20,
+            Default::default(),
+        )
+        .await
+        .unwrap();
+    let task = send(&agents, saved_actor).await;
+    drop(agents);
+    drop(engine);
+
+    let mut config = failing.config();
+    config.servers.extend(healthy_config.servers);
+    let (engine, agents) = local_app_with_mcp_tools(&database, config).await.unwrap();
+    assert_eq!(agents.unavailable_tools().len(), 2);
+    let definitions = agents.tool_definitions().unwrap();
+    assert!(
+        definitions
+            .iter()
+            .any(|tool| tool.id.name == "mcp_healthy_lookup")
+    );
+    assert!(!definitions.iter().any(|tool| tool.id.name == READ));
+    let refused = agents
+        .create_registered_actor(
+            DefinitionId::new("tool", 1),
+            None,
+            input,
+            20,
+            Default::default(),
+        )
+        .await;
+    let Err(error) = refused else {
+        panic!("must not silently omit configured defaults")
+    };
+    assert!(error.to_string().contains("MCP server service"));
+    assert!(!error.to_string().contains("secret-sentinel"));
+    let mut worker = engine.worker().await.unwrap();
+    settle(&mut worker).await;
+    assert_eq!(
+        agents.actors().unwrap().task(task).await.unwrap().status,
+        act0r::domain::actors::AgentTaskStatus::Succeeded
+    );
+    assert_eq!(healthy.state.reads.load(Ordering::SeqCst), 1);
+    assert_eq!(failing.state.reads.load(Ordering::SeqCst), 0);
+    assert_eq!(failing.state.writes.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn missing_stdio_executable_and_unresponsive_http_server_do_not_prevent_recovery_startup() {
+    let root = tempfile::tempdir().unwrap();
+    // The listener remains bound but never serves a handshake: discovery must use
+    // the configured deadline and leave no tool activity or retry loop behind.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let config: McpConfig = serde_json::from_value(json!({"replace_inspection":true,"servers":[
+        {"name":"files","command":{"program":root.path().join("missing-mcp.exe"),"args":[],"timeout_ms":100},
+            "tools":[{"name":"read","read_only":true}]},
+        {"name":"slow","http":{"url":format!("http://{}/mcp",listener.local_addr().unwrap()),"timeout_ms":100},
+            "tools":[{"name":"lookup","read_only":true,"requires_workspace":false}]}
+    ]})).unwrap();
+    let (engine, agents) = tokio::time::timeout(
+        Duration::from_secs(5),
+        local_app_with_mcp_tools(root.path().join("offline.db"), config.clone()),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(agents.unavailable_tools().len(), 2);
+    let definitions = agents.tool_definitions().unwrap();
+    assert!(!definitions.iter().any(|tool| tool.external.is_some()));
+    let error = agents
+        .create_registered_actor(
+            DefinitionId::new("tool", 1),
+            Some(source(root.path())),
+            config_actor(READ),
+            20,
+            Default::default(),
+        )
+        .await
+        .err()
+        .unwrap();
+    assert!(error.to_string().contains("MCP server files"));
+    // Malformed local configuration remains an error, rather than being treated
+    // as a temporarily unavailable server or replaced with native inspection.
+    let mut malformed = config;
+    malformed.servers[0].command.as_mut().unwrap().program = "relative-executable".into();
+    assert!(
+        local_app_with_mcp_tools(root.path().join("malformed.db"), malformed)
+            .await
+            .is_err()
+    );
+    drop(engine);
+}
+
 #[test]
 fn http_configuration_refuses_ambiguous_connections_credentials_urls_and_local_paths() {
     let valid = json!({"servers":[{"name":"remote","http":{"url":"https://service.invalid/mcp","bearer_token_env":"MCP_SERVICE_TOKEN"},
@@ -681,10 +795,42 @@ async fn named_bearer_credentials_authenticate_real_cli_calls_without_being_save
         serde_json::to_vec(&cfg).unwrap(),
     )
     .unwrap();
+    let config = root.path().join("actor.json");
+    let input = root.path().join("input.json");
+    fs::write(&config, serde_json::to_vec(&config_actor(READ)).unwrap()).unwrap();
+    fs::write(&input, br#"{"goal":"Look up durability"}"#).unwrap();
     for credential in [None, Some(""), Some("bad token"), Some("wrong-token")] {
         let output = cli_http(&database, &["actor", "tool", "list"], credential).await;
-        assert!(!output.status.success());
-        for bytes in [&output.stdout, &output.stderr] {
+        assert!(output.status.success());
+        let catalog: Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert!(
+            !catalog
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["id"]["name"] == READ || tool["id"]["name"] == WRITE)
+        );
+        let refused = cli_http(
+            &database,
+            &[
+                "actor",
+                "agent",
+                "create",
+                "tool",
+                "--config-file",
+                config.to_str().unwrap(),
+            ],
+            credential,
+        )
+        .await;
+        assert!(!refused.status.success());
+        assert!(String::from_utf8_lossy(&refused.stderr).contains("MCP server service"));
+        for bytes in [
+            &output.stdout,
+            &output.stderr,
+            &refused.stdout,
+            &refused.stderr,
+        ] {
             let text = String::from_utf8_lossy(bytes);
             assert!(!text.contains(token));
             assert!(!text.contains("wrong-token"));
@@ -700,10 +846,6 @@ async fn named_bearer_credentials_authenticate_real_cli_calls_without_being_save
             .iter()
             .any(|tool| tool["id"]["name"] == READ)
     );
-    let config = root.path().join("actor.json");
-    let input = root.path().join("input.json");
-    fs::write(&config, serde_json::to_vec(&config_actor(READ)).unwrap()).unwrap();
-    fs::write(&input, br#"{"goal":"Look up durability"}"#).unwrap();
     let created = cli_value(
         cli_http(
             &database,

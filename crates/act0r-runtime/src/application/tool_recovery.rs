@@ -180,6 +180,13 @@ impl ToolRecoveryService {
             .iter()
             .any(|receipt| receipt.request == request.clone().into());
         if external_action(&saved_request)
+            && matches!(request.decision, ToolRecoveryDecision::Accept { .. })
+            && !recorded
+            && let Some(reason) = self.engine.incompatibility(&run)
+        {
+            return Err(Error::Unavailable(reason));
+        }
+        if external_action(&saved_request)
             && matches!(request.decision, ToolRecoveryDecision::Retry {})
             && !recorded
         {

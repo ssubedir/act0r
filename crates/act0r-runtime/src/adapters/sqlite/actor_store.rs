@@ -595,6 +595,33 @@ impl ActorStore for SqliteStore {
             tx.commit().await.map_err(storage)
         })
     }
+    fn restore_actor_implementation(
+        &self,
+        id: AgentId,
+        expected_revision: u64,
+        now: i64,
+    ) -> PortFuture<'_, ()> {
+        Box::pin(async move {
+            let mut tx = self
+                .pool
+                .begin_with("BEGIN IMMEDIATE")
+                .await
+                .map_err(storage)?;
+            let mut agent = Self::load_actor(&mut tx, id).await?;
+            if agent.record.status == AgentStatus::Blocked
+                && agent.record.revision == expected_revision
+                && agent
+                    .record
+                    .supervision
+                    .as_ref()
+                    .is_none_or(|supervision| supervision.pause.is_none())
+            {
+                agent.control(false, now)?;
+                Self::save_actor(&mut tx, &agent).await?;
+            }
+            tx.commit().await.map_err(storage)
+        })
+    }
     fn clear_actor_memory(
         &self,
         id: AgentId,

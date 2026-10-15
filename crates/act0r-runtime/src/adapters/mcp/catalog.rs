@@ -126,7 +126,7 @@ impl McpConfig {
         }
         for server in &self.servers {
             match (&server.command, &server.http) {
-                (Some(command), None) => command.validate()?,
+                (Some(command), None) => command.validate_configuration()?,
                 (None, Some(http)) => {
                     http.validate()?;
                     if !server.env.is_empty()
@@ -354,9 +354,40 @@ pub async fn discover_tools(
     local: Arc<LocalTools>,
     catalog_parent: &Path,
 ) -> Result<Vec<Arc<dyn NativeTool>>, Error> {
+    Ok(discover(config, local, catalog_parent, false).await?.0)
+}
+
+/// Startup can inspect saved work even when one configured service cannot supply
+/// its contracts. Missing tools remain absent so normal saved-pin checks hold work.
+pub(crate) async fn discover_available_tools(
+    config: McpConfig,
+    local: Arc<LocalTools>,
+    catalog_parent: &Path,
+) -> Result<
+    (
+        Vec<Arc<dyn NativeTool>>,
+        Vec<crate::application::UnavailableTool>,
+    ),
+    Error,
+> {
+    discover(config, local, catalog_parent, true).await
+}
+
+async fn discover(
+    config: McpConfig,
+    local: Arc<LocalTools>,
+    catalog_parent: &Path,
+    tolerate_unavailable: bool,
+) -> Result<
+    (
+        Vec<Arc<dyn NativeTool>>,
+        Vec<crate::application::UnavailableTool>,
+    ),
+    Error,
+> {
     config.validate()?;
     if config.servers.is_empty() {
-        return Ok(vec![]);
+        return Ok((vec![], vec![]));
     }
     fs::create_dir_all(catalog_parent)?;
     let root = tempfile::Builder::new()
@@ -364,23 +395,47 @@ pub async fn discover_tools(
         .tempdir_in(catalog_parent)?;
     let root_path = fs::canonicalize(root.path())?;
     let mut tools: Vec<Arc<dyn NativeTool>> = vec![];
+    let mut unavailable = vec![];
     for server in config.servers {
-        let definitions = tokio::time::timeout(Duration::from_millis(server.timeout_ms()), async {
+        let discovered = tokio::time::timeout(Duration::from_millis(server.timeout_ms()), async {
             let mut session = server.connect(&root_path).await?;
             let result = catalog(&session).await;
             session.close().await;
-            result
+            let catalog = result?;
+            // One invalid allowed contract holds this server's whole catalog;
+            // never silently install only part of its host-selected defaults.
+            server
+                .tools
+                .iter()
+                .map(|policy| {
+                    let tool = catalog
+                        .iter()
+                        .find(|tool| tool.name.as_ref() == policy.name)
+                        .ok_or_else(|| {
+                            invalid("an allowed MCP tool is missing from the discovered catalog")
+                        })?;
+                    server.definition(policy, tool)
+                })
+                .collect::<Result<Vec<_>, Error>>()
         })
         .await
-        .map_err(|_| timeout_error())??;
-        for policy in &server.tools {
-            let tool = definitions
-                .iter()
-                .find(|t| t.name.as_ref() == policy.name)
-                .ok_or_else(|| {
-                    invalid("an allowed MCP tool is missing from the discovered catalog")
-                })?;
-            let definition = server.definition(policy, tool)?;
+        .unwrap_or_else(|_| Err(timeout_error()));
+        let definitions = match discovered {
+            Ok(definitions) => definitions,
+            Err(_) if tolerate_unavailable => {
+                tracing::warn!(server = %server.name, "MCP discovery unavailable; saved work remains inspectable, affected contracts are not installed");
+                unavailable.extend(server.tools.iter().map(|policy| {
+                    crate::application::UnavailableTool {
+                        id: crate::domain::DefinitionId::new(policy.alias(&server), 1),
+                        server: server.name.clone(),
+                        requires_workspace: policy.requires_workspace,
+                    }
+                }));
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        for (policy, definition) in server.tools.iter().zip(definitions) {
             tools.push(Arc::new(McpNativeTool {
                 server: server.clone(),
                 policy: policy.clone(),
@@ -390,7 +445,7 @@ pub async fn discover_tools(
             }));
         }
     }
-    Ok(tools)
+    Ok((tools, unavailable))
 }
 struct McpNativeTool {
     server: McpServerConfig,

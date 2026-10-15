@@ -65,6 +65,11 @@ impl AgentService {
             .ok_or_else(|| Error::Unavailable("native tool registry is not configured".into()))?
             .definitions())
     }
+    pub fn unavailable_tools(&self) -> &[super::UnavailableTool] {
+        self.tool_registry
+            .as_ref()
+            .map_or(&[], |tools| tools.unavailable_tools())
+    }
     pub fn with_tasks(mut self, tasks: super::TaskService) -> Self {
         self.tasks = Some(tasks);
         self

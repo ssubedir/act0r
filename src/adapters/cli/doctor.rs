@@ -138,7 +138,9 @@ pub(super) fn execute(
     let mcp = McpConfig::for_database(database);
     checks.push(Check::new("mcp_config", Some(&mcp_path), match &mcp {
         Ok(config) if config.servers.is_empty() => Ok("No MCP servers configured; built-in inspection remains available.".into()),
-        Ok(config) => Ok(format!("{} server(s), {} allowed tool(s), {} inspection. Servers not started.", config.servers.len(), config.servers.iter().map(|s| s.tools.len()).sum::<usize>(), if config.replace_inspection { "MCP-only" } else { "additive" })),
+        Ok(config) => config.servers.iter().filter_map(|server| server.command.as_ref())
+            .try_for_each(|command| command.validate()).map_err(|error|config_error(&error))
+            .map(|()|format!("{} server(s), {} allowed tool(s), {} inspection. Servers not started.", config.servers.len(), config.servers.iter().map(|s| s.tools.len()).sum::<usize>(), if config.replace_inspection { "MCP-only" } else { "additive" })),
         Err(error) => Err(config_error(error)),
     }, "Check mcp.json beside --db, or the ACT0R_MCP_CONFIG override. Select command with an installed executable or http with a Streamable HTTP URL, and explicit read_only tool policies (docs/mcp.md)."));
     if let Ok(config) = &mcp {

@@ -154,9 +154,9 @@ impl AgentAdapter for ToolAgentAdapter {
             .into());
         }
         if config.workspace.is_some() {
-            self.tools.pin_workspace_defaults(&mut config.tools);
+            self.tools.pin_workspace_defaults(&mut config.tools)?;
         }
-        self.tools.pin_general_defaults(&mut config.tools);
+        self.tools.pin_general_defaults(&mut config.tools)?;
         config.tool_definitions = self.tools.pin(&config.tools)?;
         if !config.tools.is_empty() {
             config
@@ -233,10 +233,10 @@ impl AgentAdapter for PlannerAgentAdapter {
             .into());
         }
         if config.workspace.is_some() {
-            self.tools.pin_workspace_defaults(&mut config.tools);
+            self.tools.pin_workspace_defaults(&mut config.tools)?;
         }
         if !config.discover_project {
-            self.tools.pin_general_defaults(&mut config.tools);
+            self.tools.pin_general_defaults(&mut config.tools)?;
         }
         config.tool_definitions = self.tools.pin(&config.tools)?;
         config.context.get_or_insert(ContextPolicy {

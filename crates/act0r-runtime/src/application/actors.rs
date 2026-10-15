@@ -346,6 +346,33 @@ impl ActorService {
             .control_actor(id, false, self.engine.clock.now_ms())
             .await
     }
+    pub(crate) async fn restore_tool_implementation(&self, id: AgentId) -> Result<(), Error> {
+        let actor = self.store.actor(id).await?;
+        if actor.record().status != AgentStatus::Blocked
+            || actor.record().definition != RegisteredAgentDefinition.id()
+        {
+            return Ok(());
+        }
+        let pinned: RegisteredAgentConfig = serde_json::from_value(actor.record().config.clone())?;
+        if self.agent_registry.as_ref().is_some_and(|registry| {
+            registry
+                .check_config(&pinned.registration, &pinned.input)
+                .is_ok()
+        }) && self
+            .engine
+            .definitions
+            .contains_key(&pinned.registration.workflow_id())
+        {
+            self.store
+                .restore_actor_implementation(
+                    id,
+                    actor.record().revision,
+                    self.engine.clock.now_ms(),
+                )
+                .await?;
+        }
+        Ok(())
+    }
 }
 impl WorkCoordinator for ActorService {
     fn advance(&self) -> PortFuture<'_, bool> {
