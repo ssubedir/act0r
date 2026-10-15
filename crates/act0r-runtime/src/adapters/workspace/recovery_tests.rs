@@ -319,7 +319,9 @@ async fn killed_edits_and_tests_recover_with_exact_receipts_across_restarts() {
             json!({"decision":{"action":"accept","result":{"ok":true}}}),
             json!({"argv":["other"]}),
         ] {
-            let status = if bad.get("argv").is_some() || bad.get("decision").is_some() {
+            // Accept is a recognized MCP decision; native journal recovery
+            // rejects it as an invalid request rather than an unknown JSON variant.
+            let status = if bad.get("argv").is_some() {
                 StatusCode::UNPROCESSABLE_ENTITY
             } else {
                 StatusCode::BAD_REQUEST
@@ -329,7 +331,10 @@ async fn killed_edits_and_tests_recover_with_exact_receipts_across_restarts() {
                 .as_object_mut()
                 .unwrap()
                 .extend(bad.as_object().unwrap().clone());
-            post(&client, &mutation, &invalid, status).await;
+            let rejected = post(&client, &mutation, &invalid, status).await;
+            if bad.get("decision").is_some() {
+                assert_eq!(rejected["error"]["code"], "invalid_request");
+            }
         }
         let wrong = format!(
             "{}/v1/harness/sessions/{}/turns/{}/runs/{run}/reconciliation",

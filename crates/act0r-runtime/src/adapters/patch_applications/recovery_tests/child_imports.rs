@@ -295,7 +295,8 @@ async fn partial_child_import_recovers_scoped_receipts_and_requires_combined_tes
         post(&client, &url, &invalid, StatusCode::BAD_REQUEST).await;
         let mut invalid = body.clone();
         invalid["decision"] = json!({"action":"accept","result":{"ok":true}});
-        post(&client, &url, &invalid, StatusCode::UNPROCESSABLE_ENTITY).await;
+        let rejected = post(&client, &url, &invalid, StatusCode::BAD_REQUEST).await;
+        assert_eq!(rejected["error"]["code"], "invalid_request");
         let mut invalid = body.clone();
         invalid["target"] = json!(workspace);
         post(&client, &url, &invalid, StatusCode::UNPROCESSABLE_ENTITY).await;
