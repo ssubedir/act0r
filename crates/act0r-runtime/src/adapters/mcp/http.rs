@@ -18,6 +18,7 @@ use rmcp::{
 };
 use sse_stream::{Sse, SseStream};
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU16, Ordering};
 
 const MAX_RESPONSE: usize = 1_048_576;
 
@@ -101,11 +102,32 @@ impl McpHttpConfig {
         let mut retry = ExponentialBackoff::default();
         retry.max_times = Some(0);
         config.retry_config = Arc::new(retry);
-        let transport = StreamableHttpClientTransport::with_client(HttpClient(client), config);
+        let status = Arc::new(AtomicU16::new(0));
+        let transport = StreamableHttpClientTransport::with_client(
+            HttpClient {
+                client,
+                status: status.clone(),
+            },
+            config,
+        );
         let client = ().serve(transport).await.map_err(|_| {
-            Error::Unavailable(
-                "MCP HTTP handshake failed; check endpoint, bearer token and Streamable HTTP support".into(),
-            )
+            // The SDK may close its worker while sending notifications/initialized,
+            // obscuring the HTTP error. Keep only its status, never the response body.
+            let status = status.load(Ordering::Relaxed);
+            let message = if status == 0 {
+                "MCP HTTP handshake interrupted; check endpoint and Streamable HTTP support".into()
+            } else {
+                format!(
+                    "MCP HTTP handshake refused (HTTP {status}); check endpoint and bearer token"
+                )
+            };
+            if status == 0 || matches!(status, 408 | 425 | 429 | 500..=599) {
+                // No tools have been dispatched during initialization. Let the
+                // durable activity policy schedule a retry rather than the SDK.
+                std::io::Error::new(std::io::ErrorKind::Interrupted, message).into()
+            } else {
+                Error::Unavailable(message)
+            }
         })?;
         Ok(Session {
             client,
@@ -118,14 +140,21 @@ fn config_error() -> Error {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("MCP HTTP {0}")]
-struct HttpError(&'static str);
+enum HttpError {
+    #[error("MCP HTTP {0}")]
+    Protocol(&'static str),
+    #[error("MCP HTTP endpoint returned status {0}")]
+    Status(u16),
+}
 type HttpResult<T> = Result<T, StreamableHttpError<HttpError>>;
 fn failure(reason: &'static str) -> StreamableHttpError<HttpError> {
-    StreamableHttpError::Client(HttpError(reason))
+    StreamableHttpError::Client(HttpError::Protocol(reason))
 }
 #[derive(Clone)]
-struct HttpClient(reqwest::Client);
+struct HttpClient {
+    client: reqwest::Client,
+    status: Arc<AtomicU16>,
+}
 impl HttpClient {
     fn request(
         &self,
@@ -135,7 +164,7 @@ impl HttpClient {
         headers: HashMap<HeaderName, HeaderValue>,
     ) -> HttpResult<reqwest::RequestBuilder> {
         let mut request = self
-            .0
+            .client
             .request(method, uri)
             .header("accept", "application/json, text/event-stream");
         for (name, value) in headers {
@@ -163,10 +192,10 @@ impl HttpClient {
     fn sse(response: reqwest::Response) -> BoxStream<'static, Result<Sse, SseError>> {
         let mut received = 0usize;
         let bytes = response.bytes_stream().map(move |chunk| {
-            let chunk = chunk.map_err(|_| HttpError("response stream failed"))?;
+            let chunk = chunk.map_err(|_| HttpError::Protocol("response stream failed"))?;
             received = received.saturating_add(chunk.len());
             if received > MAX_RESPONSE {
-                return Err(HttpError("response exceeded 1 MiB"));
+                return Err(HttpError::Protocol("response exceeded 1 MiB"));
             }
             Ok(chunk)
         });
@@ -184,6 +213,7 @@ impl StreamableHttpClient for HttpClient {
         headers: HashMap<HeaderName, HeaderValue>,
     ) -> HttpResult<StreamableHttpPostResponse> {
         let notification = !matches!(message, ClientJsonRpcMessage::Request(_));
+        self.status.store(0, Ordering::Relaxed);
         let mut response = self
             .request(Method::POST, &uri, session.as_deref(), headers)?
             .json(&message)
@@ -191,17 +221,18 @@ impl StreamableHttpClient for HttpClient {
             .await
             .map_err(|_| failure("request failed"))?;
         let status = response.status();
+        if !status.is_success() {
+            self.status.store(status.as_u16(), Ordering::Relaxed);
+        }
         if status == reqwest::StatusCode::NOT_FOUND && session.is_some() {
             return Err(StreamableHttpError::SessionExpired);
         }
         // Error bodies can contain credentials or arbitrary HTML. Never include them
         // in persisted diagnostics, model context, or transport tracing.
         if !status.is_success() {
-            return Err(failure(if matches!(status.as_u16(), 401 | 403) {
-                "authentication refused"
-            } else {
-                "endpoint refused request"
-            }));
+            return Err(StreamableHttpError::Client(HttpError::Status(
+                status.as_u16(),
+            )));
         }
         if status == reqwest::StatusCode::ACCEPTED
             || status == reqwest::StatusCode::NO_CONTENT

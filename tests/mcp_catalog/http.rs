@@ -31,6 +31,7 @@ struct Service {
     reads: AtomicUsize,
     writes: AtomicUsize,
     sessions: AtomicUsize,
+    notification_status: AtomicUsize,
     seen: Mutex<Vec<Value>>,
     expected_token: Mutex<Option<String>>,
     redirect_to: Mutex<Option<String>>,
@@ -110,6 +111,14 @@ async fn handle(
     s.seen.lock().unwrap().push(json!({"request":request,"version":headers.get("mcp-protocol-version").and_then(|v|v.to_str().ok()),"session":headers.get("mcp-session-id").and_then(|v|v.to_str().ok()),"authorized":authorized}));
     let name = request["method"].as_str().unwrap();
     if request.get("id").is_none() {
+        let status = s.notification_status.load(Ordering::SeqCst);
+        if name == "notifications/initialized" && status != 0 {
+            return (
+                StatusCode::from_u16(status as u16).unwrap(),
+                "untrusted response body with secret-sentinel",
+            )
+                .into_response();
+        }
         return StatusCode::ACCEPTED.into_response();
     }
     let mode = s.mode.load(Ordering::SeqCst);
@@ -527,6 +536,104 @@ async fn changed_http_contract_refuses_dispatch_and_read_transport_errors_stay_r
         ));
     }
     assert_eq!(server.state.reads.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn transient_initialized_notification_failures_retry_the_saved_activity_after_restart() {
+    for status in [429, 503] {
+        let server = Server::new(None, false).await;
+        let root = tempfile::tempdir().unwrap();
+        let database = root.path().join("handshake.db");
+        let (engine, agents) = local_app_with_mcp_tools(&database, server.config())
+            .await
+            .unwrap();
+        actor(&agents, READ).await;
+        let mut worker = engine.worker().await.unwrap();
+        let call = admit(&mut worker).await;
+        let before = engine.status(call.run_id).await.unwrap();
+        let model = before
+            .activities()
+            .iter()
+            .find(|a| a.spec.handler.name == "agent.model")
+            .unwrap()
+            .clone();
+        server
+            .state
+            .notification_status
+            .store(status, Ordering::SeqCst);
+        let outcome = worker.execute(call.clone()).await.unwrap();
+        let Outcome::Failure(failure) = &outcome else {
+            panic!("{outcome:?}")
+        };
+        assert!(failure.retryable);
+        assert!(failure.message.contains(&format!("HTTP {status}")));
+        assert!(!failure.message.contains("secret-sentinel"));
+        worker.complete(call.clone(), outcome).await.unwrap();
+        assert_eq!(server.state.reads.load(Ordering::SeqCst), 0);
+        drop(worker);
+        drop(agents);
+        drop(engine);
+        server.state.notification_status.store(0, Ordering::SeqCst);
+        let (engine, _agents) = local_app_with_mcp_tools(&database, server.config())
+            .await
+            .unwrap();
+        let mut worker = engine.worker().await.unwrap();
+        settle(&mut worker).await;
+        let after = engine.status(call.run_id).await.unwrap();
+        assert_eq!(after.record().status, RunStatus::Succeeded);
+        assert_eq!(
+            after
+                .attempts()
+                .iter()
+                .filter(|a| a.activity_id == call.activity_id)
+                .count(),
+            2
+        );
+        assert_eq!(
+            json!(
+                after
+                    .activities()
+                    .iter()
+                    .find(|a| a.id == model.id)
+                    .unwrap()
+            ),
+            json!(model)
+        );
+        assert_eq!(server.state.reads.load(Ordering::SeqCst), 1);
+    }
+}
+
+#[tokio::test]
+async fn permanent_handshake_refusals_preserve_status_without_retrying_or_echoing_bodies() {
+    let server = Server::new(None, false).await;
+    let root = tempfile::tempdir().unwrap();
+    let tools = discover_tools(
+        server.config(),
+        Arc::new(LocalTools::new(root.path().into())),
+        root.path(),
+    )
+    .await
+    .unwrap();
+    let definition = tools
+        .iter()
+        .find(|tool| tool.definition().id.name == READ)
+        .unwrap()
+        .definition();
+    let registry = ToolRegistry::new(tools).unwrap();
+    for status in [400, 401, 403, 404] {
+        server
+            .state
+            .notification_status
+            .store(status, Ordering::SeqCst);
+        let outcome = registry.execute(execution_http(&definition)).await.unwrap();
+        let Outcome::Failure(failure) = outcome else {
+            panic!()
+        };
+        assert!(!failure.retryable);
+        assert!(failure.message.contains(&format!("HTTP {status}")));
+        assert!(!failure.message.contains("secret-sentinel"));
+    }
+    assert_eq!(server.state.reads.load(Ordering::SeqCst), 0);
 }
 
 async fn cli_http(database: &Path, args: &[&str], token: Option<&str>) -> std::process::Output {

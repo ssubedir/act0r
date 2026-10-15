@@ -718,7 +718,7 @@ impl NativeTool for McpNativeTool {
                 {
                     NativeToolResult::Failure(Failure::new(
                         "mcp_connection",
-                        "temporary MCP connection failure",
+                        format!("temporary MCP connection failure: {error}"),
                         true,
                     ))
                 }
