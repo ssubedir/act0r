@@ -386,7 +386,7 @@ async fn uncertain_actions_block_across_restart_and_verified_results_continue_wi
         let database = root.path().join("unknown.db");
         let mut cfg = config_action(root.path(), mode);
         if mode == "hang" {
-            cfg.servers[0].command.timeout_ms = 1500;
+            cfg.servers[0].command.as_mut().unwrap().timeout_ms = 1500;
         }
         let (engine, agents) = local_app_with_mcp_tools(&database, cfg.clone())
             .await
@@ -473,7 +473,7 @@ async fn predispatch_contract_changes_or_timeouts_never_become_unknown_effects()
     for mode in ["changed", "startup_hang"] {
         let root = tempfile::tempdir().unwrap();
         let mut cfg = config_action(root.path(), "success");
-        cfg.servers[0].command.timeout_ms = 1500;
+        cfg.servers[0].command.as_mut().unwrap().timeout_ms = 1500;
         let managed = root.path().join("scratch");
         let tools = discover_tools(cfg, Arc::new(LocalTools::new(managed.clone())), &managed)
             .await

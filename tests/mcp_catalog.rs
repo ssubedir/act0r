@@ -20,6 +20,8 @@ use std::{
 mod actions;
 #[path = "mcp_catalog/general.rs"]
 mod general;
+#[path = "mcp_catalog/http.rs"]
+mod http;
 
 const INFO: &str = "mcp_files_get_file_info";
 fn node() -> PathBuf {
@@ -332,7 +334,7 @@ async fn changed_schema_or_binding_on_restart_blocks_admission_and_restores_save
         drop(engine);
         let mut changed = cfg.clone();
         if binding {
-            changed.servers[0].command.timeout_ms += 1;
+            changed.servers[0].command.as_mut().unwrap().timeout_ms += 1;
         } else {
             fs::write(root.path().join("calls.jsonl.mode"), "changed").unwrap();
         }

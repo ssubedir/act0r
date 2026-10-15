@@ -18,7 +18,10 @@ pub struct McpConfig {
 #[serde(deny_unknown_fields)]
 pub struct McpServerConfig {
     pub name: String,
-    pub command: McpFilesystemConfig,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<McpFilesystemConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub http: Option<McpHttpConfig>,
     pub tools: Vec<McpToolPolicy>,
     /// Explicit trusted host environment, independent of the model's environment.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -122,7 +125,24 @@ impl McpConfig {
             ));
         }
         for server in &self.servers {
-            server.command.validate()?;
+            match (&server.command, &server.http) {
+                (Some(command), None) => command.validate()?,
+                (None, Some(http)) => {
+                    http.validate()?;
+                    if !server.env.is_empty()
+                        || server.tools.iter().any(|tool| tool.requires_workspace)
+                    {
+                        return Err(invalid(
+                            "HTTP MCP tools require requires_workspace:false and no process environment or local workspace paths",
+                        ));
+                    }
+                }
+                _ => {
+                    return Err(invalid(
+                        "MCP servers require exactly one command or http connection",
+                    ));
+                }
+            }
             let mut keys = HashSet::new();
             if server.env.len() > 8
                 || server.env.iter().any(|(key, value)| {
@@ -191,9 +211,20 @@ impl McpToolPolicy {
     }
 }
 impl McpServerConfig {
+    fn timeout_ms(&self) -> u64 {
+        self.command
+            .as_ref()
+            .map_or_else(|| self.http.as_ref().unwrap().timeout_ms, |c| c.timeout_ms)
+    }
     async fn connect(&self, workspace: &Path) -> Result<Session, Error> {
-        let args = self
+        if let Some(http) = &self.http {
+            return http.connect().await;
+        }
+        let command = self
             .command
+            .as_ref()
+            .ok_or_else(|| invalid("MCP command is missing"))?;
+        let args = command
             .args
             .iter()
             .map(|arg| {
@@ -204,7 +235,7 @@ impl McpServerConfig {
                 }
             })
             .collect();
-        Session::start_with_env(&self.command, workspace, args, &self.env).await
+        Session::start_with_env(command, workspace, args, &self.env).await
     }
     fn definition(&self, policy: &McpToolPolicy, tool: &Tool) -> Result<ToolDefinition, Error> {
         let input_schema = serde_json::to_value(&tool.input_schema)?;
@@ -213,7 +244,12 @@ impl McpServerConfig {
             .as_ref()
             .map(serde_json::to_value)
             .transpose()?;
-        let mut identity = json!({"server":self.name,"command":self.command,"policy":policy});
+        let mut identity = if let Some(command) = &self.command {
+            // Keep the original stdio identity, including its field order.
+            json!({"server":self.name,"command":command,"policy":policy})
+        } else {
+            json!({"server":self.name,"http":self.http,"policy":policy})
+        };
         if !self.env.is_empty() {
             identity["env"] = json!(self.env);
         }
@@ -248,6 +284,10 @@ impl McpServerConfig {
             format!(
                 "{description}\nReturns saved MCP content and structuredContent with an ok flag. Configured file path arguments {:?} must use relative project file paths; the runtime supplies the managed root.",
                 policy.path_parameters
+            )
+        } else if self.http.is_some() {
+            format!(
+                "{description}\nReturns saved MCP content and structuredContent with an ok flag. Calls the configured HTTP MCP service without local project context."
             )
         } else {
             format!(
@@ -325,15 +365,14 @@ pub async fn discover_tools(
     let root_path = fs::canonicalize(root.path())?;
     let mut tools: Vec<Arc<dyn NativeTool>> = vec![];
     for server in config.servers {
-        let definitions =
-            tokio::time::timeout(Duration::from_millis(server.command.timeout_ms), async {
-                let mut session = server.connect(&root_path).await?;
-                let result = catalog(&session).await;
-                session.close().await;
-                result
-            })
-            .await
-            .map_err(|_| timeout_error())??;
+        let definitions = tokio::time::timeout(Duration::from_millis(server.timeout_ms()), async {
+            let mut session = server.connect(&root_path).await?;
+            let result = catalog(&session).await;
+            session.close().await;
+            result
+        })
+        .await
+        .map_err(|_| timeout_error())??;
         for policy in &server.tools {
             let tool = definitions
                 .iter()
@@ -433,6 +472,11 @@ impl McpNativeTool {
         let contract = self.definition.external.as_ref().unwrap();
         let mut arguments = contract.arguments(&call.arguments);
         if !self.policy.requires_workspace {
+            if self.server.http.is_some() {
+                return self
+                    .invoke_in(&self.scratch_root, arguments, dispatched)
+                    .await;
+            }
             let directory = InspectionView::create(&self.scratch_root, "mcp-general-")?;
             return self
                 .invoke_in(directory.path(), arguments, dispatched)
@@ -643,7 +687,7 @@ impl NativeTool for McpNativeTool {
             self.definition.validate_arguments(&call.arguments)?;
             let dispatched = AtomicBool::new(false);
             let outcome = tokio::time::timeout(
-                Duration::from_millis(self.server.command.timeout_ms),
+                Duration::from_millis(self.server.timeout_ms()),
                 self.invoke(call, &dispatched),
             )
             .await;

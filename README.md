@@ -47,7 +47,7 @@ See the [actor guide](docs/actor-model.md#actor-model) for the execution model a
 - **Recoverable workflows:** saved model/tool results, retries, durable timers, human questions, approvals and explicit recovery for uncertain effects.
 - **Agent coordination:** sequential or parallel delegation, worker messages, questions, dependency waits and per-assignment pause/stop controls.
 - **Project work:** automatic discovery, scoped edits in isolated copies, pinned verification commands, immutable patches and reviewed application to source.
-- **Configurable tools and models:** MCP inspection tools, native journaled mutations and commands, and compatible model endpoints with structured JSON or native function calling.
+- **Configurable tools and models:** Local stdio and remote HTTP MCP tools, native journaled mutations and commands, and compatible model endpoints with structured JSON or native function calling.
 - **Conversation state:** ordered follow-ups, bounded context, optional summaries and recorded model-call/token usage with optional limits.
 - **Inspection and control:** CLI status/history, goal inboxes, pause/resume/stop, JSON output and local HTTP/SSE routes.
 

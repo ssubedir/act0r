@@ -146,6 +146,53 @@ fn doctor_mcp_start_fixture() {
 }
 
 #[test]
+fn doctor_checks_http_token_configuration_without_contacting_the_mcp_endpoint() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let config = root.join("mcp.json");
+    let mut value = json!({"servers":[{"name":"records","http":{
+        "url":format!("http://{}/mcp",listener.local_addr().unwrap()),
+        "bearer_token_env":"ACT0R_DOCTOR_HTTP_TOKEN"},
+        "tools":[{"name":"lookup","read_only":true,"requires_workspace":false}]}]});
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+    for token in [None, Some(" "), Some("doctor-http-secret")] {
+        let mut command = command(root);
+        local(&mut command)
+            .env("ACT0R_MCP_CONFIG", &config)
+            .env_remove("ACT0R_DOCTOR_HTTP_TOKEN");
+        if let Some(token) = token {
+            command.env("ACT0R_DOCTOR_HTTP_TOKEN", token);
+        }
+        let output = command.output().unwrap();
+        let ready = token == Some("doctor-http-secret");
+        let result = report(&output, ready);
+        assert_eq!(
+            check(&result, "mcp_server:records")["status"],
+            if ready { "ok" } else { "error" }
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("doctor-http-secret"));
+    }
+    value["servers"][0]["http"]["url"] = json!("https://service.invalid/mcp?token=embedded-secret");
+    fs::write(&config, serde_json::to_vec(&value).unwrap()).unwrap();
+    let output = local(&mut command(root))
+        .env("ACT0R_MCP_CONFIG", &config)
+        .output()
+        .unwrap();
+    assert_eq!(
+        check(&report(&output, false), "mcp_config")["status"],
+        "error"
+    );
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("embedded-secret"));
+    assert_eq!(
+        listener.accept().unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock
+    );
+    assert_eq!(fs::read_dir(root).unwrap().count(), 1);
+}
+
+#[test]
 fn doctor_uses_chat_model_environment_and_explicit_overrides_without_exposing_keys() {
     let directory = tempfile::tempdir().unwrap();
     let output = command(directory.path())

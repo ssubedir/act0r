@@ -26,7 +26,9 @@ use tokio::{
 };
 
 mod catalog;
+mod http;
 pub use catalog::{McpConfig, McpServerConfig, McpToolPolicy, discover_tools};
+pub use http::McpHttpConfig;
 
 /// Trusted host configuration, never supplied by the model. The managed workspace is
 /// appended as the server's sole runtime root. Use a direct executable, not a shell.
@@ -179,16 +181,12 @@ impl WorkspaceReader for McpWorkspaceReader {
     }
 }
 fn timeout_error() -> Error {
-    std::io::Error::new(
-        std::io::ErrorKind::TimedOut,
-        "MCP filesystem deadline exceeded",
-    )
-    .into()
+    std::io::Error::new(std::io::ErrorKind::TimedOut, "MCP deadline exceeded").into()
 }
 fn disconnected() -> Error {
     std::io::Error::new(
         std::io::ErrorKind::Interrupted,
-        "MCP filesystem connection interrupted",
+        "MCP connection interrupted",
     )
     .into()
 }
@@ -200,7 +198,7 @@ struct ServerProcess {
 }
 struct Session {
     client: RunningService<RoleClient, ()>,
-    process: ServerProcess,
+    process: Option<ServerProcess>,
 }
 impl Session {
     async fn connect(config: &McpFilesystemConfig, workspace: &Path) -> Result<Self, Error> {
@@ -260,7 +258,10 @@ impl Session {
             ().serve((stdout.take(128 * 1024 * 1024), stdin))
                 .await
                 .map_err(|_| disconnected())?;
-        Ok(Self { client, process })
+        Ok(Self {
+            client,
+            process: Some(process),
+        })
     }
     async fn check_tool(&self) -> Result<(), Error> {
         let mut cursor = None;
@@ -342,7 +343,9 @@ impl Session {
     }
     async fn close(&mut self) {
         let _ = self.client.close_with_timeout(Duration::from_secs(1)).await;
-        let _ = self.process.tree.terminate().await;
-        let _ = tokio::time::timeout(Duration::from_secs(2), self.process.child.wait()).await;
+        if let Some(process) = &mut self.process {
+            let _ = process.tree.terminate().await;
+            let _ = tokio::time::timeout(Duration::from_secs(2), process.child.wait()).await;
+        }
     }
 }

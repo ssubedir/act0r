@@ -22,14 +22,15 @@ thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal", "sync", "process", "io-util", "fs", "net"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4", "serde"] }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 sha2 = "0.10"
 httpdate = "1"
 toml = { version = "0.9", default-features = false, features = ["parse", "serde", "std"] }
 tempfile = "3"
 axum = { version = "0.8.9", default-features = false, features = ["http1", "json", "tokio", "query"] }
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
-rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-async-rw"] }
+rmcp = { version = "3.5.1", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
+sse-stream = "0.2.4"
 jsonschema = { version = "0.58.6", default-features = false }
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading", "Win32_System_Diagnostics_ToolHelp"] }
 libc = "0.2"

@@ -375,7 +375,7 @@ async fn general_calls_keep_scope_schema_errors_output_limits_and_timeout_cleanu
         let root = tempfile::tempdir().unwrap();
         let mut cfg = general_config(root.path(), mode);
         if mode == "hang" {
-            cfg.servers[0].command.timeout_ms = 1500;
+            cfg.servers[0].command.as_mut().unwrap().timeout_ms = 1500;
         }
         let managed = root.path().join("scratch");
         let tools = discover_tools(cfg, Arc::new(LocalTools::new(managed.clone())), &managed)

@@ -2,7 +2,7 @@
 
 <a id="mcp-tools"></a>
 
-Configure local stdio servers and their explicitly allowed tools once on the API/worker host. act0r discovers their names, descriptions, input schemas and optional output schemas through MCP and pins them into newly created tool/planner actors according to their workspace requirements. With `replace_inspection: true`, workspace actors use the MCP inspection tools directly instead of the built-in `read_file`, `read_files`, `list_files` and `search_text` tools. This includes the harness's project inspection, discovery and coding actors. Adding a supported tool requires configuration rather than a Rust wrapper.
+Configure local stdio or remote Streamable HTTP servers and their explicitly allowed tools once on the CLI/API/worker host. act0r discovers their names, descriptions, input schemas and optional output schemas through MCP and pins them into newly created tool/planner actors according to their workspace requirements. With `replace_inspection: true`, workspace actors use the MCP inspection tools directly instead of the built-in `read_file`, `read_files`, `list_files` and `search_text` tools. This includes the harness's project inspection, discovery and coding actors. Adding a supported tool requires configuration rather than a Rust wrapper.
 
 For service queries or other tools that do not need project files, set `requires_workspace: false` in that tool's allowlist policy:
 
@@ -10,7 +10,7 @@ For service queries or other tools that do not need project files, set `requires
 {"name":"lookup","read_only":true,"requires_workspace":false}
 ```
 
-These tools are available to the planner in ordinary `act0r chat` without `--project`, and to fresh tool actors with or without a project. Each call runs in an empty temporary working directory with no project context; an exact `{workspace}` command argument receives that temporary directory. File and directory parameter policies must be empty. The same durable activity records save contracts, arguments and results for restart recovery. Omitting `requires_workspace` retains the existing project requirement. Existing actors keep their pinned catalogs; changing a saved tool's policy or contract requires restoring its original definition to recover that work. General tools do not replace project inspection: `replace_inspection: true` still requires at least one workspace tool.
+These tools are available to the planner in ordinary `act0r chat` without `--project`, and to fresh tool actors with or without a project. Local stdio calls run in an empty temporary working directory with no project context; an exact `{workspace}` command argument receives that temporary directory. HTTP calls send only the tool arguments to the service. File and directory parameter policies must be empty. The same durable activity records save contracts, arguments and results for restart recovery. Omitting `requires_workspace` retains the existing project requirement. Existing actors keep their pinned catalogs; changing a saved tool's policy or contract requires restoring its original definition to recover that work. General tools do not replace project inspection: `replace_inspection: true` still requires at least one workspace tool.
 
 For service actions that make changes, explicitly configure both policies:
 
@@ -23,6 +23,35 @@ Each action requires human approval, including in Auto mode. The CLI displays th
 The project-discovery planner retains its inspection-only catalog. General service tools are added to normal planners and tool actors, including the coding phase after discovery.
 
 Contracts, approvals, attempts and successful results are durable. A committed result is reused after restart. If execution is interrupted, or a dispatched action returns a connection, protocol, tool, schema or output-limit error, the runtime blocks with `uncertain_outcome` because effects may already exist. It does not automatically repeat that action. Inspect the service and ensure the previous operation has stopped, then use `run status RUN_ID` and `run reconcile RUN_ID --decision-file decision.json`. A decision identifies the saved `activity_id` and `attempt_id`, includes inspection `evidence`, and chooses `accept` with the verified MCP result (`ok`, `content`, and any `structuredContent`), `retry`, or `fail` with a message. Retrying is an explicit operator decision; MCP does not provide an exactly-once guarantee. A timeout or refusal before dispatch has no action effects and follows the normal failure policy.
+
+### Remote HTTP services
+
+Select exactly one `command` or `http` connection per server. For example, save this as `mcp.json` beside the database:
+
+```json
+{
+  "servers": [{
+    "name": "records",
+    "http": {
+      "url": "https://service.example/mcp",
+      "bearer_token_env": "MCP_SERVICE_TOKEN",
+      "timeout_ms": 30000
+    },
+    "tools": [
+      {"name": "lookup", "read_only": true, "requires_workspace": false},
+      {"name": "update_record", "read_only": false, "requires_workspace": false}
+    ]
+  }]
+}
+```
+
+Set `MCP_SERVICE_TOKEN` in the launching host's environment. Omit `bearer_token_env` for an unauthenticated service; model credentials are never used implicitly. The configuration and binding contain the variable name, not its value. Credentials are read at connection time, so token rotation does not change the pinned contract. Changing the endpoint, variable name, deadline or tool policy changes the binding and can block saved work until its original configuration is restored. `act0r doctor` checks the URL and presence of the configured token locally; normal startup performs the handshake and discovers tools.
+
+The endpoint must support MCP Streamable HTTP, with JSON or SSE responses. Use HTTPS; plain HTTP is allowed only on localhost or the IPv4/IPv6 loopback address. URLs cannot contain embedded credentials, query strings or fragments, and redirects are refused. OAuth discovery/login and the older standalone HTTP+SSE transport are not supported. HTTP tools require `requires_workspace: false` and cannot declare process `env`, file paths or directory mappings. Project inspection stays with local stdio servers; project files are not uploaded automatically.
+
+Each activity opens a connection and rechecks its contract before dispatch. Responses are bounded to 1 MiB at the transport and 64 KiB for a saved tool result; deadlines are 1–60000 ms. Transport retries and automatic session-expiry replays are disabled. Durable read retries use the existing activity policy. A lost, expired, oversized or timed-out action response requires reconciliation, even if the service completed the change. Disconnecting cannot guarantee that a remote operation stopped; confirm its state before authorizing a retry.
+
+### Local stdio servers
 
 Install Node.js 22 or later, ripgrep (`rg`), and the pinned MCP servers once on the host:
 
@@ -63,7 +92,7 @@ Save this host configuration as `.act0r/mcp.json`. Set `program` to the absolute
 
 Start `act0r chat`, the CLI worker or the API: the host loads `mcp.json` alongside its database automatically. Chat defaults to `.act0r/chat.db`, so it loads the `.act0r/mcp.json` configuration above. Other CLI commands default to `act0r.db` in the current directory, with adjacent `mcp.json`; pass `--db .act0r/chat.db` to inspect or run the chat database from those commands. `ACT0R_MCP_CONFIG` may select another file and takes precedence; a separately launched worker using the same database picks up the same adjacent file. `actor tool list` includes the discovered `mcp_files_*` tools. Fresh workspace actors receive them without duplicate built-in inspection choices or steering instructions. No additional team imports are required. Existing actors retain their saved tool sets when configuration or the inspection mode changes. Built-in tools stay registered for their recovery. Omitting `replace_inspection` selects an additive tool catalog; an absent configuration retains local inspection.
 
-Use [`act0r doctor`](harness.md#doctor) to check this configuration and its executable paths without starting servers or opening the database. It defaults to the chat database location too; use the same `--db` override as your intended command. Server handshakes and advertised tool contracts are checked by normal startup, rather than doctor.
+Use [`act0r doctor`](harness.md#doctor) to check this configuration, executable paths and HTTP credential presence without starting servers, contacting endpoints or opening the database. It defaults to the chat database location too; use the same `--db` override as your intended command. Server handshakes and advertised tool contracts are checked by normal startup, rather than doctor.
 
 The reference server's `search_files` finds filenames. The [ripgrep MCP server](https://github.com/AtefAndrus/mcp-ripgrep) supplies content search as `mcp_code_search`; its entry point is `.act0r/mcp-filesystem/node_modules/@atef_andrus/mcp-ripgrep/dist/index.js`. No search-specific Rust adapter is needed. The server's additional tools, including search/replace, are not allowlisted. This project inspection configuration enables only reads; edits, tests and approved patch application retain their existing journaled implementations.
 
@@ -77,7 +106,7 @@ A server may declare an explicit `env` object, with at most eight bounded litera
 
 The original schemas are saved in `ToolDefinition.external`, alongside an opaque hash of the selected server command and tool policy. They validate arguments and successful structured results; a separate strict model projection represents absent optional fields with null. Schemas must fit 32 KiB, have depth at most 32, and use self-contained declared object parameters. References and pattern properties are rejected; schema validation cannot retrieve network or filesystem resources. `kind` is reserved at the top level. The adapter supports text and structured JSON results, preserves their MCP fields, and adds `ok`; read-only `isError` results become saved `ok: false` observations. Complete results exceeding 64 KiB are never silently truncated; read-only calls fail and actions require reconciliation.
 
-Startup discovery invokes no tools and uses an empty temporary root. Each activity then starts its own scoped server and rechecks the selected contract before dispatch. Changes found on restart block saved work: restore the original configuration and server contract, then resume the Run with the existing controls. A change discovered between startup and dispatch refuses that call with a saved execution error. A binding hash identifies configuration, not executable contents: compatible server implementations remain the host's responsibility. Adding another allowed tool does not change existing tool bindings. SQLite migration 62 guards the new serialized contracts without rewriting existing catalogs, activities or results.
+Startup discovery invokes no tools and gives local servers an empty temporary root. Each activity then opens its own connection, scopes local servers to the permitted directory and rechecks the selected contract before dispatch. Changes found on restart block saved work: restore the original configuration and server contract, then resume the Run with the existing controls. A change discovered between startup and dispatch refuses that call with a saved execution error. A binding hash identifies configuration, not executable contents: compatible server implementations remain the host's responsibility. Adding another allowed tool does not change existing tool bindings. SQLite migration 62 guards the new serialized contracts without rewriting existing catalogs, activities or results.
 
 Run `cargo test --locked --test mcp_catalog --test mcp_inspection -- --include-ignored` with Node.js for the configuration, schema, MCP-only discovery, harness, CLI, snapshot cleanup and restart tests. The metadata example, `cargo run --locked --example mcp_catalog -- METADATA_CONFIG`, expects a configuration whose first allowed tool is `get_file_info` with `path_parameters: ["path"]`; it changes the file after saving its result and reopens the runtime to verify the original result and exact continuation with one tool attempt. Rust hosts can use `bootstrap::local_app_with_mcp_tools(database, config)` or install the implementations returned by `mcp::discover_tools` in their own composition root. Both reuse the `NativeTool` port and durable activity registry.
 
@@ -198,6 +227,8 @@ No model endpoint or API key is needed:
 
 ```powershell
 cargo test --locked --test mcp_tools
+# HTTP transport, credentials and restart tests use local loopback servers; no Node required:
+cargo test --locked --test mcp_catalog http::
 # Optional transport/restart/cancellation tests use Node.js and a controllable local MCP peer:
 cargo test --locked --test mcp_tools -- --ignored
 # Exercise the installed reference filesystem server and restart with the saved result:

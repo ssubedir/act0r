@@ -140,14 +140,17 @@ pub(super) fn execute(
         Ok(config) if config.servers.is_empty() => Ok("No MCP servers configured; built-in inspection remains available.".into()),
         Ok(config) => Ok(format!("{} server(s), {} allowed tool(s), {} inspection. Servers not started.", config.servers.len(), config.servers.iter().map(|s| s.tools.len()).sum::<usize>(), if config.replace_inspection { "MCP-only" } else { "additive" })),
         Err(error) => Err(config_error(error)),
-    }, "Check mcp.json beside --db, or the ACT0R_MCP_CONFIG override. Use the documented schema, absolute existing executables, bounded arguments and explicit read_only tool policies (docs/mcp.md)."));
+    }, "Check mcp.json beside --db, or the ACT0R_MCP_CONFIG override. Select command with an installed executable or http with a Streamable HTTP URL, and explicit read_only tool policies (docs/mcp.md)."));
     if let Ok(config) = &mcp {
         for server in &config.servers {
-            executable_check(
-                &mut checks,
-                &format!("mcp_server:{}", server.name),
-                &server.command,
-            );
+            if let Some(command) = &server.command {
+                executable_check(&mut checks, &format!("mcp_server:{}", server.name), command);
+            }
+            if let Some(http) = &server.http {
+                checks.push(Check::new(&format!("mcp_server:{}",server.name),None,
+                    http.check_credentials().map(|_|"HTTP endpoint and optional credential configured; connectivity not tested.".into()).map_err(|_|"MCP HTTP token environment variable is missing, blank or invalid.".into()),
+                    "Set the configured bearer_token_env variable in the worker environment. HTTP MCP requires a Streamable HTTP endpoint; doctor does not contact it."));
+            }
         }
     }
     // Startup also supports the optional compatibility file-reader bridge.
