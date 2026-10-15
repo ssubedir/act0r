@@ -7,6 +7,7 @@ The intended final harness combines **durable actors + Monte Carlo tree search (
 - Stable native actors, durable mailboxes and task lifecycle controls.
 - SQLite-backed activities, timers, waits, usage accounting and restart recovery.
 - Automatic project discovery, isolated coding, verification and reviewed application.
+- Prompt-first CLI conversations with saved questions, approvals and session resume.
 - Native worker coordination and persistent conversations.
 - Configuration-driven MCP inspection tools.
 

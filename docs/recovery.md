@@ -201,6 +201,8 @@ Tests kill a child worker after a synced external file effect but before result 
 
 After automatic model retries stop, the harness recovery API permits an explicit retry for a settled root planner turn with a transient provider failure or invalid/incomplete model response. Recovery sends the exact saved model request with one additional attempt. It resumes the same Run at the failed model checkpoint; completed tools, delegated results, actor context, permissions and model configuration stay pinned.
 
+The [chat CLI](harness.md#chat) exposes this same service through `/retry`. It displays the saved failure and eligibility, and `/status` includes the recovery view. Resume a failed conversation with `act0r chat --resume SESSION_ID /retry` to admit recovery directly. The command reads a fresh checkpoint and supplies its exact Run/activity/attempt identities and history sequence; the existing admission transaction validates them before saving a receipt. Each explicit command grants one attempt, and the recovered answer updates the same visible turn.
+
 Original failed activities, attempts, diagnostics and history remain saved. Each recovery adds a new model activity and a `turn_recovery_requested` event. Successful recovery updates the existing task result and records its answer in actor memory once. Repeated failed recoveries require new explicit decisions.
 
 All previous calls, actual tokens and conservative charges remain counted. Run attempt limits, Run model/token budgets and shared goal/delegation budgets still apply. Unlimited defaults stay unlimited. An outstanding provider `Retry-After` deadline is retained. Recovery does not execute a model call inside the HTTP request.
@@ -231,7 +233,7 @@ Local HTTP fixtures verify exact request reuse, completed file-read reuse, dupli
 
 New Code sessions also [route planner guidance to active coding workers](planner.md#planner-guidance) while their original child join stays open. Saved worker messages show delivery separately from the root instruction's Pending/Applied status.
 
-Use the steering API below to guide an unfinished native root planner. For example, send “Focus on the API first” while it works. This instruction belongs to the selected turn and its existing Run; it does not create a conversation turn or change the actor's permissions, workspace, model or budget.
+Use [`act0r chat`](harness.md#chat) with `/steer MESSAGE`, or the steering API below, to guide an unfinished native root planner. For example, send “Focus on the API first” while it works. This instruction belongs to the selected turn and its existing Run; it does not create a conversation turn or change the actor's permissions, workspace, model or budget. The CLI restores pending/delivered states on resume and reports guidance left undelivered when its task finishes.
 
 Instructions are saved in arrival order. Clients should persist the exact message identity, Run and text before sending. An identical retry after reload, lost acknowledgement, completion or restart recovers the original receipt. Reusing that identity with changed text or another scope conflicts.
 

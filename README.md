@@ -53,7 +53,7 @@ See the [actor guide](docs/actor-model.md#actor-model) for the execution model a
 
 ## Current scope
 
-The CLI provides actor, team, Run, worker and inspection commands. High-level automatic project conversations currently use the Rust harness service or HTTP API; the [Auto example](examples/README.md) drives that flow from a terminal. The HTTP server exposes JSON/SSE routes and serves no UI.
+The CLI's `chat` command starts or resumes a durable conversation, discovers an optional project's setup and drives coding through verification and patch review. Actor, team, Run, worker and inspection commands remain available. The same harness services support the Rust API and local HTTP JSON/SSE routes; the HTTP server serves no UI.
 
 The runtime assumes trusted local callers. Managed project copies isolate workspace changes, but project commands and MCP servers are not OS sandboxes. Only the current development database schema is supported; older development databases have no upgrade path.
 
@@ -70,7 +70,25 @@ cargo build --locked
 cargo run --locked -- --help
 ```
 
-The first build may download Cargo dependencies. Run a scripted actor team without a model server:
+The first build may download Cargo dependencies. Set `OPENAI_API_KEY` for a hosted compatible model, then start a conversation:
+
+```sh
+cargo run --locked -- chat --project ./my-project
+# An optional first request can be supplied directly:
+cargo run --locked -- chat --project ./my-project "Fix the failing tests"
+# Restore the model, project, conversation and pending decisions from SQLite:
+cargo run --locked -- chat --resume SESSION_ID
+```
+
+Omit `--project` for a general conversation. The harness automatically handles project discovery and routine scoped work in its managed copy. Answer questions normally; `/steer MESSAGE` saves guidance for the current task's next fresh model request. `/patch` shows saved changes and `/apply` prepares their reviewed application to the original folder. `/exit` or Ctrl+C leaves work saved. Use `chat --list` to find sessions. See the [chat CLI guide](docs/harness.md#chat) for models, controls and piped input.
+
+Live activity shows model requests, tools, MCP calls, worker assignments and test results as they are saved. Resuming restores a short recap before following new work.
+
+In an interactive terminal, paste and edit a multiline draft before sending it: Enter adds a line, and Ctrl+S sends the whole message. Alt+Enter also sends when supported by your terminal. Activity updates keep your draft visible. Pipes and `--json` retain one input per line.
+
+When automatic model retries stop, `/retry` can resume an eligible failure using the saved request and completed work. Chat explains when a failure needs another action.
+
+Run a scripted actor team without a model server:
 
 ```sh
 team=$(cargo run --locked -- team create --config-file examples/configs/agent-team.json)
@@ -81,7 +99,7 @@ cargo run --locked -- team task status "$team" "$task"
 
 The sample uses fixed responses to demonstrate delegation and message handling. For PowerShell commands, see the [CLI guide](docs/harness.md#cli).
 
-The CLI defaults to `act0r.db`; use `--db PATH` on every command to choose another database. Ctrl+C drains the worker; restart against the same database to resume saved work. Use global `--json` for machine-readable output.
+Chat defaults to `.act0r/chat.db` in the current directory, keeping runtime state out of project inspection. Other commands default to `act0r.db`; use `--db PATH` to select the chat database for lower-level inspection or choose another database. The printed resume command includes its absolute database path. Ctrl+C drains the worker; restart against the same database to resume saved work. Use global `--json` for machine-readable output.
 
 For live compatible models, including NVIDIA, set `OPENAI_API_KEY` in the worker environment and configure the model target in JSON. Loopback servers such as LM Studio can run without a key. See the [CLI guide](docs/harness.md#cli), [team configuration](docs/teams.md#agent-teams--configuration), [model providers](docs/providers.md) and [MCP setup](docs/mcp.md).
 

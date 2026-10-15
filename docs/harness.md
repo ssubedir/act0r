@@ -3,6 +3,7 @@
 Start with the CLI, then use these sections for harness service/API contracts, project setup, saved sessions and verification. Dated browser trials below record historical validation from before the UI was removed.
 
 - [Run from the CLI](#cli)
+- [Chat with the harness](#chat)
 - [Automatic project work](#automatic-project-work)
 - [Continuous Auto conversations](#continuous-conversations)
 - [General project onboarding](#project-onboarding)
@@ -28,9 +29,87 @@ cargo run --locked -- actor --help
 cargo run --locked -- team --help
 ```
 
-The CLI defaults to `act0r.db`. Use global `--db PATH` on every command to select another database, creating its parent directory first. Global `--json` exposes structured results for scripts. Credentials come from the launching environment; set `OPENAI_API_KEY` for hosted compatible model targets. Loopback model servers can run without authentication. Model targets and tool policies live in JSON configuration; see [models](providers.md) and [MCP setup](mcp.md).
+Chat defaults to `.act0r/chat.db`; other commands default to `act0r.db`. Use global `--db PATH` to select another database; missing parent directories are created. Global `--json` exposes structured results for scripts. Credentials come from the launching environment; set `OPENAI_API_KEY` for hosted compatible model targets. Loopback model servers can run without authentication. Chat takes model flags or environment defaults; actor/team model targets and tool policies live in JSON configuration. See [models](providers.md) and [MCP setup](mcp.md).
 
 The built executable is `target/debug/act0r` on Unix and `target/debug/act0r.exe` on Windows. No frontend build or JavaScript launcher is required. Node is needed only for Node-based tools, fixtures and docs checks.
+
+<a id="chat"></a>
+
+### Chat with the harness
+
+`act0r chat` runs a durable conversation directly through the harness services and hosts the existing worker. Give it an optional project folder and enter a task; it discovers the project's setup, works in an isolated copy, runs the selected verification and presents the saved patch. No team JSON or HTTP server is needed. Omit the folder for general agent conversations.
+
+```sh
+act0r chat --project ./my-project
+act0r chat --project ./my-project "Fix the failing tests"
+act0r chat --list
+act0r chat --resume SESSION_ID
+```
+
+The session ID and an exact resume command, including the absolute database path, are printed when the request is saved. `--db PATH` selects the database, as with other CLI commands. The default `.act0r/chat.db` is excluded from project copies, so `--project .` can work in the current directory. Explicit database paths must be outside the project or beneath its excluded `.act0r/` or `.build/` directories. Use the printed `--db` path for lower-level actor/Run commands too. Resuming restores the canonical conversation, original model, project settings, questions and approvals, including discovery's coding continuation. Completed model/tool results are reused. The terminal displays the newest 32 conversation turns; all history remains durable.
+
+For new conversations, `ACT0R_MODEL` and `ACT0R_MODEL_ENDPOINT` supply the same defaults as the API. Explicit `--model` and `--endpoint` override them. The endpoint is the full Chat Completions URL, not just its `/v1` base. `--action-format function-calling` selects native model functions; `--action-format json-schema` selects structured JSON. The tested NVIDIA Kimi default uses function calling automatically. Set `OPENAI_API_KEY` for hosted compatible endpoints; loopback models can run without a key. Model/project overrides are refused with `--resume`, because existing sessions retain their saved pins. Token and call budgets remain unlimited by default.
+
+```sh
+act0r chat --project ./my-project \
+  --model YOUR_LOCAL_MODEL \
+  --endpoint http://127.0.0.1:1234/v1/chat/completions \
+  --action-format function-calling
+```
+
+Enter follow-up requests as ordinary text. When a question appears, the next submitted message answers its saved wait; approvals accept `yes` or `no`. Routine Auto edits, configured commands, tests and conflict-free worker imports run in the isolated copy. Applying to the original folder always uses the existing separate preview and approval workflow.
+
+When stdin, stdout and stderr are terminals and `TERM` is not `dumb`, chat uses [Reedline](https://github.com/nushell/reedline) to edit one complete message. Enter adds a newline; Ctrl+S sends the draft. Alt+Enter also sends when your terminal forwards that shortcut; some terminal hosts reserve it, so Ctrl+S is the portable choice. Cursor movement, deletion and session-local input history are available. Multiline paste stays in the draft until you send it, and activity updates print above the draft. For example, a pasted code block containing a line such as `/retry` remains part of that message, rather than becoming a separate command.
+
+Submitted messages and their input handoff are bounded. If a previous submission has not yet been consumed, chat keeps the next draft in the editor and asks you to send it again. Unsent drafts and the most recent 100 history entries stay in memory; they are not saved to another history file. Ctrl+C exits with admitted work saved and discards any unsent draft. Ctrl+D at an empty draft also exits. The terminal is restored on exit, errors and worker shutdown. The CLI keeps its ordinary line reader for pipes, redirected streams, `TERM=dumb` and `--json`; those modes retain one request or reply per input line and emit no editor controls.
+
+Activity updates identify the planner or worker and show model requests, tool starts/completions, MCP calls, test outcomes, retries and worker assignment results. They come from committed history; a start confirms admission, and a completion confirms a saved result. Tool refusals and nonzero test exits remain visible as failures. Names and path previews are bounded and escaped; updates omit file contents, model prompts, tool output and full arguments.
+
+Resuming prints the active goal's most recent 24 activity updates with a `Recent` prefix, then follows new activity. Reading the saved timeline uses bounded pages and does not rerun work or make model calls. Older details remain available through `team task events` or `run history`. Large backlogs drain across polls so terminal input remains responsive; an event beyond the timeline's maximum page size stops only the activity display and reports its identity.
+
+| Command | Behavior |
+| --- | --- |
+| `/status` | Inspect the current turn and owned tasks |
+| `/retry` | Retry an eligible failed model request once at its saved checkpoint |
+| `/steer MESSAGE` | Save guidance for the active planner task's next fresh model request |
+| `/patch` | Display its saved patch and completion assessment |
+| `/apply` | Prepare an application preview, then ask for approval |
+| `/pause` | Save an admission hold for the current goal |
+| `/resume` | Release that goal's saved hold |
+| `/stop` | Save cancellation for the current turn and its owned work |
+| `/exit` | Leave the conversation and drain the worker |
+| `/help` | List these commands |
+
+Use `/steer` to correct work already underway instead of queuing another request:
+
+```text
+/steer Keep the public API unchanged. Only modify src/math.mjs.
+```
+
+The acknowledgement confirms the instruction was saved. Delivery status is shown automatically and restored after restart; `/status` includes the current task's steering history. `pending` means it is waiting for a fresh model request, `delivered` means it was included in that request, and `not_delivered` means the task ended before delivery. Delivery records admission of the model request, not proof that the model followed the instruction. An in-flight request or its exact retry keeps its saved input.
+
+Guidance belongs to the active planner task. It does not create a follow-up, answer a pending question, release a pause or grant tools, permissions or budgets. Auto discovery and coding have separate tasks; their guidance stays scoped to the task that accepted it. A finished task refuses new guidance. Existing runtime limits allow 16 instructions per task, each containing 1..4096 UTF-8 bytes, within 16 KiB of serialized steering context. See [durable steering](recovery.md#turn-steering) for recovery and delivery rules.
+
+After automatic model retries stop, chat displays the saved failure and recovery eligibility. Use `/retry` for an eligible transient provider failure or invalid/incomplete model response. Each command admits one additional model attempt in the same task and Run, using the exact saved request. Completed reads, edits, tests and worker results remain saved; a successful recovery prints the recovered answer. A failed recovery requires another explicit `/retry`. Provider retry deadlines and all existing budget charges still apply. `chat --resume SESSION_ID /retry` also works with piped input or after restarting the CLI.
+
+`/retry` rechecks eligibility when entered and reports the reason when recovery is unavailable. Running work, questions, pauses, cancellation, unsafe tool outcomes, exhausted budgets, later work that consumed the failed history and archived sessions retain their existing guards. Configuration/authentication errors require correction and a new request; restart the CLI to reload changed environment settings. Refusals require a revised request. `/retry` does not answer questions, release pauses, grant permissions or start another conversation turn. See [failed turn recovery](recovery.md#turn-recovery) for the full contract.
+
+Ctrl+C also drains the worker. Questions, approvals and deadlines survive exit; interrupted external effects retain their recovery policy and may require [explicit reconciliation](recovery.md#reconciliation). A blocked task reports its reason and Run ID for inspection with `run status`. Another worker cannot own the database simultaneously; `chat --list` is read-only and can run alongside one.
+
+Input can come from stdin. After EOF, the CLI processes eligible work until it settles or needs a human decision, pause release or recovery; then it exits with the session saved. Supply a reply directly when resuming a pending question or approval:
+
+```sh
+act0r chat --resume SESSION_ID "Keep the public API unchanged"
+act0r chat --resume SESSION_ID yes
+```
+
+Global `--json` emits one JSON object per line with `event` and `data` fields, including `session`, `status`, `question`, `approval`, `response`, `patch` and `saved`. `steering_saved` acknowledges durable guidance; `steering` reports its delivery state. Both include the saved entry, message identity and `status`. There is no prose on stdout in this mode. Send answers after the corresponding decision event; future ordinary requests use the existing durable turn queue. Invalid replies or steering produce `input_error` and leave pending work available. Input lines are bounded to 65,536 UTF-8 bytes.
+
+Interactive drafts have the same 65,536-byte UTF-8 input limit, applied to the entire message including newlines. Domain limits for goals, steering and answers still apply. Piped EOF waits for the saved conversation response before exiting when the worker finishes between polls.
+
+`activity` carries `event_id`, global timeline `position`, task/actor/Run/activity/attempt identities, `member`, timestamp `at`, saved event `kind`, display `status`, optional `tool`, concise `message` and `replayed`. Replayed entries retain their original event IDs; consumers can use these to recognize the recap across process restarts. Each committed event is displayed once per CLI process. `retrying` appears only after a new attempt is admitted; a failure alone does not promise another attempt. `activity_unavailable` reports an event too large for the timeline reader. Raw saved history remains available separately.
+
+`recovery` reports the saved failed checkpoint, diagnostic, `retry_allowed`, `blocked_reason` and recovery receipts; `/status` includes the same view under `recovery` for a failed turn. `recovery_saved` acknowledges durable retry admission, including the exact decision identity and resumed activity ID. Admission can wait for a saved provider deadline; it does not mean the model request has started. A recovered turn emits a new `response` under its original task ID, so JSON consumers must allow an updated answer after recovery.
 
 ### Submit and inspect actor work
 
@@ -62,7 +141,7 @@ cargo run --locked -- team task inbox "$team" "$task"
 
 Use `actor coding-worker --source PATH --config-file FILE` for a persistent coding actor, or a configured [coding team](teams.md#agent-teams--configuration) for planner delegation. Writable paths, model target and verifier are pinned in the configuration. Work happens in isolated managed copies. Inspect tasks and changes before [applying a patch](tools.md#patch-application) to the original project. Interrupted external effects require [reconciliation](recovery.md#reconciliation).
 
-For the full automatic discovery, coding, verification and follow-up flow, run `cargo run --locked --example auto_conversation`, or use the Rust harness service and [local HTTP API](api.md#http-api--prompt-first-harness). High-level harness session operations are currently exposed through those interfaces; the CLI provides actor, team, Run and worker commands.
+For the full automatic discovery, coding, verification and follow-up flow, use [`act0r chat --project PATH`](#chat). The Rust harness service and [local HTTP API](api.md#http-api--prompt-first-harness) expose the same workflows. `cargo run --locked --example auto_conversation` demonstrates recovery with a local fixture model.
 
 ```sh
 cargo run --locked -- api serve --with-worker
@@ -100,7 +179,7 @@ An unrecoverable setup failure is saved once and displayed as Needs attention. I
 
 ### Interface
 
-Use the Rust harness service or `POST /v1/harness/sessions` for Auto requests. Saved human questions and answers remain available through the goal inbox and conversation projections. See [API routes](api.md#http-api--prompt-first-harness).
+Use [`act0r chat --project PATH`](#chat), the Rust harness service or `POST /v1/harness/sessions` for Auto requests. Saved human questions and answers remain available through the goal inbox and conversation projections. See [API routes](api.md#http-api--prompt-first-harness).
 
 <a id="automatic-project-work--checks"></a>
 

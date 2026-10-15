@@ -18,6 +18,7 @@ use std::{
     time::Duration,
 };
 mod api;
+mod chat;
 #[path = "cli/task_inspection.rs"]
 mod task_inspection;
 mod team_events;
@@ -26,8 +27,9 @@ mod teams;
 #[derive(Parser)]
 #[command(version, about = "Durable local workflows for AI agents")]
 pub struct Cli {
-    #[arg(long, global = true, default_value = "act0r.db")]
-    db: PathBuf,
+    /// Database file (chat: .act0r/chat.db; other commands: act0r.db).
+    #[arg(long, global = true)]
+    db: Option<PathBuf>,
     #[arg(long, global = true)]
     json: bool,
     #[command(subcommand)]
@@ -35,6 +37,8 @@ pub struct Cli {
 }
 #[derive(Subcommand)]
 enum TopCommand {
+    /// Start or resume a durable conversation; discover and work on an optional project.
+    Chat(chat::ChatOptions),
     /// Inspect retained harness storage and remove reviewed generated workspace caches.
     Storage {
         #[command(subcommand)]
@@ -475,12 +479,22 @@ enum BenchmarkCommand {
 
 impl Cli {
     pub fn database(&self) -> &Path {
-        &self.db
+        self.db.as_deref().unwrap_or_else(|| {
+            if matches!(self.command, TopCommand::Chat(_)) {
+                Path::new(".act0r/chat.db")
+            } else {
+                Path::new("act0r.db")
+            }
+        })
     }
 }
 
 pub async fn execute(cli: Cli, engine: Engine, agents: AgentService) -> Result<(), Error> {
+    let database = cli.database().to_path_buf();
     match cli.command {
+        TopCommand::Chat(options) => {
+            chat::execute(options, engine, &agents, &database, cli.json).await?
+        }
         TopCommand::Storage { command } => {
             let value = match command {
                 StorageCommand::Report => serde_json::to_value(agents.storage()?.report().await?)?,
@@ -1522,7 +1536,7 @@ pub async fn execute(cli: Cli, engine: Engine, agents: AgentService) -> Result<(
                         {
                             println!(
                                 "Resolve after inspection: act0r --db \"{}\" run reconcile {} --decision-file decision.json",
-                                cli.db.display(),
+                                database.display(),
                                 record.id
                             );
                         }

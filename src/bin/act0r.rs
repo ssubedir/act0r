@@ -12,6 +12,13 @@ async fn main() -> ExitCode {
         .init();
     let cli = Cli::parse();
     let result = async {
+        if let Some(parent) = cli
+            .database()
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent)?;
+        }
         let (engine, agents) = act0r::bootstrap::local_app(cli.database()).await?;
         execute(cli, engine, agents).await
     }

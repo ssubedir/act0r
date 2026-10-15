@@ -9,7 +9,7 @@ Native function calling, structured actions, timeouts and provider retries.
 
 ## Native model function calling
 
-Saved targets select their model protocol and action format. CLI targets and HTTP requests that omit `action_format` use structured JSON. Set it explicitly to `function_calling` for compatible Chat Completions servers; the tested NVIDIA `moonshotai/kimi-k3` connection supports this format. Existing sessions, queued requests and follow-ups retain their pinned target and format.
+Saved targets select their model protocol and action format. Actor configurations and HTTP requests that omit `action_format` use structured JSON. Set it explicitly to `function_calling` for compatible Chat Completions servers; the tested NVIDIA `moonshotai/kimi-k3` connection supports this format. [`act0r chat`](harness.md#chat) shares the API's initial model defaults, including function calling for that tested NVIDIA target, and offers `--action-format` for new sessions. Existing sessions, queued requests and follow-ups retain their pinned target and format.
 
 CLI actor and HTTP harness configurations can opt in through the saved target:
 

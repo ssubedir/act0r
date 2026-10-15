@@ -171,11 +171,8 @@ pub async fn execute(agents: &AgentService, request: Request) -> Result<Value, E
 
 fn harness_config() -> Value {
     use crate::adapters::model::ModelRouter;
-    let endpoint = std::env::var("ACT0R_MODEL_ENDPOINT")
-        .unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1/chat/completions".into());
-    let model = std::env::var("ACT0R_MODEL").unwrap_or_else(|_| "moonshotai/kimi-k3".into());
     json!({
-        "target":harness_target(&model, &endpoint),
+        "target":harness_model_target(None, None),
         "api_key_available":ModelRouter::environment_key_available(),
         "workspace_access":"read_only",
           "budget_defaults":{"max_model_calls":null,"max_tokens":null},
@@ -185,6 +182,18 @@ fn harness_config() -> Value {
             "test_command":{"argv":["cargo","test","--locked","--offline"],"timeout_ms":60000}
         }
     })
+}
+
+/// Initial model defaults shared by the CLI and HTTP adapter; saved sessions retain their pins.
+pub fn harness_model_target(model: Option<&str>, endpoint: Option<&str>) -> Value {
+    let endpoint = endpoint.map(str::to_owned).unwrap_or_else(|| {
+        std::env::var("ACT0R_MODEL_ENDPOINT")
+            .unwrap_or_else(|_| "https://integrate.api.nvidia.com/v1/chat/completions".into())
+    });
+    let model = model.map(str::to_owned).unwrap_or_else(|| {
+        std::env::var("ACT0R_MODEL").unwrap_or_else(|_| "moonshotai/kimi-k3".into())
+    });
+    harness_target(&model, &endpoint)
 }
 
 fn harness_target(model: &str, endpoint: &str) -> Value {
