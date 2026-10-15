@@ -294,7 +294,7 @@ impl HarnessService<'_> {
         session: SessionId,
         turn: MessageId,
     ) -> Result<super::ToolRecoveries, Error> {
-        let context = self.coding_context(session, turn).await?;
+        let context = self.reader.harness_turn_context(session, turn).await?;
         let goal_paused = context.paused;
         let (runs, truncated) = self.reader.harness_tool_runs(session, turn).await?;
         let mut items = Vec::new();
@@ -316,8 +316,22 @@ impl HarnessService<'_> {
         id: RunId,
         request: tool_recovery::ToolRecoveryRequest,
     ) -> Result<(), Error> {
-        self.coding_context(session, turn).await?;
+        let context = self.reader.harness_turn_context(session, turn).await?;
         let (_, run) = self.reader.harness_tool_run(session, turn, id).await?;
+        if (context.coding.is_none() || context.workspace.is_none())
+            && !run.activities().iter().any(|activity| {
+                activity.id == request.activity_id
+                    && serde_json::from_value::<tools::NativeToolRequest>(
+                        activity.spec.input.clone(),
+                    )
+                    .is_ok_and(|saved| tool_recovery::external_action(&saved))
+            })
+        {
+            return Err(DomainError::InvalidConfiguration(
+                "native workspace tool recovery requires a coding session".into(),
+            )
+            .into());
+        }
         self.recovery()?.reconcile(run, request).await
     }
     fn import_recovery(&self) -> Result<&super::ChildImportRecoveryService, Error> {

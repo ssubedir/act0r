@@ -94,6 +94,7 @@ Resuming prints the active goal's most recent 24 activity updates with a `Recent
 | --- | --- |
 | `/status` | Inspect the current turn and owned tasks |
 | `/retry` | Retry an eligible failed model request once at its saved checkpoint |
+| `/reconcile` | Inspect interrupted MCP actions and record a decision for an exact attempt |
 | `/steer MESSAGE` | Save guidance for the active planner task's next fresh model request |
 | `/patch` | Display its saved patch and completion assessment |
 | `/apply` | Prepare an application preview, then ask for approval |
@@ -102,6 +103,18 @@ Resuming prints the active goal's most recent 24 activity updates with a `Recent
 | `/stop` | Save cancellation for the current turn and its owned work |
 | `/exit` | Leave the conversation and drain the worker |
 | `/help` | List these commands |
+
+An MCP action whose response was lost stays blocked until you inspect the external service. Chat shows its pinned tool identity, normalized arguments and interrupted attempt ID. Use `/reconcile` to display it again. After confirming the previous operation stopped, record one decision directly in chat:
+
+```text
+/reconcile ATTEMPT_ID retry --stopped Verified no effect; the previous operation stopped.
+/reconcile ATTEMPT_ID accept --stopped {"ok":true,"content":[{"type":"text","text":"Verified receipt r-1"}],"structuredContent":{"receipt":"r-1"}} -- Inspected receipt r-1; operation stopped.
+/reconcile ATTEMPT_ID fail --stopped Partial change needs manual attention; operation stopped.
+```
+
+Choose one decision and replace `ATTEMPT_ID` with the saved ID. `--stopped` is your explicit confirmation; chat does not verify or terminate the remote operation. Evidence must contain 1–16384 UTF-8 bytes. An accepted result must be a successful MCP result with `ok: true`, text `content`, and any `structuredContent` matching the pinned output schema and size limit. Supply the verified service result rather than the example receipt above. The entire chat submission retains the existing 65536-byte input limit.
+
+Decisions are scoped to this conversation turn and its owned work. An identical submission replays its saved receipt; a conflicting decision is refused, and retrying a newer interrupted attempt requires its own ID. Acceptance reuses the supplied result, retry preserves the approved arguments and existing attempt limits, and fail records the error without claiming effects were undone. Existing goal pauses remain held. Reopening a session restores pending recovery details and saved decision receipts. `/retry` remains the separate control for failed model requests. Native journaled edits, commands, imports and project verification retain their existing [recovery controls](recovery.md#reconciliation).
 
 Use `/steer` to correct work already underway instead of queuing another request:
 

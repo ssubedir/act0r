@@ -307,6 +307,9 @@ async fn timed_out_command_is_unknown_after_restart_and_only_exact_confirmed_ret
     let mut decision = json!({"activity_id":recovery["activity_id"],"attempt_id":recovery["attempt_id"],"decision":{"action":"retry"},"evidence":"Inspected partial effects; local process tree stopped","operation_stopped":false});
     post(&client(), &url, &decision, StatusCode::BAD_REQUEST).await;
     decision["operation_stopped"] = json!(true);
+    let mut fabricated = decision.clone();
+    fabricated["decision"] = json!({"action":"accept","result":{"ok":true,"exit_code":0}});
+    post(&client(), &url, &fabricated, StatusCode::BAD_REQUEST).await;
     fs::write(Path::new(&copy).join("allow-finish"), "").unwrap();
     post(&client(), &url, &decision, StatusCode::OK).await;
     post(&client(), &url, &decision, StatusCode::OK).await;

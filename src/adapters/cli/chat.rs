@@ -24,6 +24,7 @@ use std::{
 use tokio::sync::oneshot;
 mod activity;
 mod input;
+mod reconciliation;
 
 #[derive(Args)]
 pub(super) struct ChatOptions {
@@ -245,6 +246,9 @@ struct Displayed {
     steering: HashMap<MessageId, &'static str>,
     steering_scope: Option<HarnessReceipt>,
     recovery: Option<String>,
+    tool_recoveries: HashSet<crate::domain::AttemptId>,
+    reconciliation_receipts: HashSet<crate::domain::AttemptId>,
+    reconciliation_turn: Option<MessageId>,
     progress: String,
 }
 struct Snapshot {
@@ -256,6 +260,7 @@ struct Snapshot {
     steering: TurnSteering,
     activity_pending: bool,
     recovery: Option<TurnRecovery>,
+    tool_recoveries: Option<crate::application::ToolRecoveries>,
 }
 fn stage_label(stage: ConversationStage) -> &'static str {
     match stage {
@@ -505,6 +510,18 @@ async fn refresh(
             }
         }
     }
+    let tool_recoveries = if displayed.reconciliation_turn != Some(scope.task_id)
+        || task.task.nodes.iter().any(|node| node.status == "blocked")
+    {
+        let view = harness
+            .tool_recoveries(scope.session_id, scope.task_id)
+            .await?;
+        reconciliation::show(&view, displayed, output, false)?;
+        displayed.reconciliation_turn = Some(scope.task_id);
+        Some(view)
+    } else {
+        None
+    };
     Ok(Snapshot {
         conversation,
         task,
@@ -514,6 +531,7 @@ async fn refresh(
         steering,
         activity_pending,
         recovery,
+        tool_recoveries,
     })
 }
 
@@ -770,6 +788,11 @@ async fn handle_line(
 ) -> Result<(), Error> {
     let scope = &snapshot.conversation.active;
     let teams = agents.teams()?;
+    if let Some(text) = line.trim().strip_prefix("/reconcile")
+        && (text.is_empty() || text.starts_with(char::is_whitespace))
+    {
+        return reconciliation::handle(text, agents, scope, displayed, output).await;
+    }
     if let Some(text) = line.trim().strip_prefix("/steer")
         && (text.is_empty() || text.starts_with(char::is_whitespace))
     {
@@ -811,17 +834,19 @@ async fn handle_line(
         );
     }
     match line.trim() {
-        "/help" => output.note("Enter requests or answers normally. Approvals take yes/no. /steer MESSAGE guides the current turn. Commands: /status, /retry, /patch, /apply, /pause, /resume, /stop, /exit."),
+        "/help" => output.note("Enter requests or answers normally. Approvals take yes/no. /steer MESSAGE guides the current turn. /reconcile inspects interrupted MCP actions. Commands: /status, /retry, /reconcile, /patch, /apply, /pause, /resume, /stop, /exit."),
         "/status" => {
             let mut data = json!(snapshot.task);
             data["steering"] = json!(snapshot.steering);
             data["recovery"] = json!(snapshot.recovery);
+            data["tool_recoveries"] = json!(snapshot.tool_recoveries);
             output.emit("status", data, &format!("{}; {} tasks pending", stage_label(snapshot.conversation.stage), snapshot.task.task.summary.pending))?;
             for entry in &snapshot.steering.items {
                 let status = if entry.application.is_some() { "delivered" } else if snapshot.steering.terminal { "not delivered" } else { "pending" };
                 output.note(&format!("Steering {status}: {}", entry.request.text))?;
             }
             if let Some(view) = &snapshot.recovery { show_recovery(view, output)?; }
+            if let Some(view) = &snapshot.tool_recoveries { reconciliation::show(view, displayed, output, true)?; }
             Ok(())
         }
         "/retry" => {

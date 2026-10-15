@@ -681,13 +681,7 @@ impl HarnessStorePort for SqliteStore {
     ) -> PortFuture<'_, (MessageId, Run)> {
         Box::pin(async move {
             let mut tx = self.pool.begin().await.map_err(storage)?;
-            let context = Self::harness_context(&mut tx, session, turn).await?;
-            if context.coding.is_none() {
-                return Err(DomainError::InvalidConfiguration(
-                    "tool recovery requires a coding session".into(),
-                )
-                .into());
-            }
+            Self::harness_context(&mut tx, session, turn).await?;
             let owner: Option<String> =
                 sqlx::query_scalar("SELECT request_id FROM agent_runs WHERE run_id=?")
                     .bind(id.to_string())
@@ -713,13 +707,7 @@ impl HarnessStorePort for SqliteStore {
     ) -> PortFuture<'_, (Vec<(MessageId, Run)>, bool)> {
         Box::pin(async move {
             let mut tx = self.pool.begin().await.map_err(storage)?;
-            let context = Self::harness_context(&mut tx, session, turn).await?;
-            if context.coding.is_none() {
-                return Err(DomainError::InvalidConfiguration(
-                    "tool recovery requires a coding session".into(),
-                )
-                .into());
-            }
+            Self::harness_context(&mut tx, session, turn).await?;
             let rows: Vec<(String,String)> = sqlx::query_as("WITH RECURSIVE owned(id) AS (SELECT ? UNION SELECT o.id FROM agent_goal_ownership o JOIN owned p ON o.parent_id=p.id)
                 SELECT a.request_id,r.id FROM agent_runs a JOIN owned o ON o.id=a.request_id JOIN runs r ON r.id=a.run_id
                 WHERE r.status='blocked' OR json_array_length(json_extract(r.payload,'$.reconciliation_receipts'))>0 ORDER BY json_extract(r.payload,'$.updated_at') DESC,r.id DESC LIMIT 129")

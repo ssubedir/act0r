@@ -199,6 +199,12 @@ impl ChildImportRecoveryService {
         request: tool_recovery::ToolRecoveryRequest,
     ) -> Result<(), Error> {
         request.validate()?;
+        if matches!(
+            request.decision,
+            tool_recovery::ToolRecoveryDecision::Accept { .. }
+        ) {
+            return Err(DomainError::InvalidReconciliation("child imports require their own saved journal; accept is only supported for MCP actions".into()).into());
+        }
         let activity = run
             .activities()
             .iter()

@@ -10,6 +10,8 @@ use std::{
     },
     time::Duration,
 };
+#[path = "chat/reconciliation.rs"]
+mod reconciliation;
 #[path = "chat/terminal.rs"]
 mod terminal;
 

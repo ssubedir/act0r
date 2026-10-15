@@ -201,6 +201,12 @@ impl ProjectVerificationService {
         request: tool_recovery::ToolRecoveryRequest,
     ) -> Result<(), Error> {
         request.validate()?;
+        if matches!(
+            request.decision,
+            tool_recovery::ToolRecoveryDecision::Accept { .. }
+        ) {
+            return Err(DomainError::InvalidReconciliation("project verification requires its own saved completion receipt; accept is only supported for MCP actions".into()).into());
+        }
         if run.record().workflow != workflow()
             || !run
                 .activities()

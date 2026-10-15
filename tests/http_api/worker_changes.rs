@@ -441,6 +441,19 @@ async fn interrupted_transfer_requires_explicit_recovery_and_replays_finished_jo
         operation_stopped: true,
     };
     let body = json!(replay);
+    let mut fabricated = body.clone();
+    fabricated["decision"] = json!({"action":"accept","result":{"status":"applied"}});
+    post(
+        &client(),
+        &format!(
+            "{}/runs/{}/child-import-reconciliation",
+            base(&s, &r),
+            run(&r)
+        ),
+        &fabricated,
+        StatusCode::BAD_REQUEST,
+    )
+    .await;
     post(
         &client(),
         &format!(

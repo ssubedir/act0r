@@ -380,6 +380,9 @@ async fn published_verification_receipt_recovers_without_second_process_and_time
     let mut decision = json!({"activity_id":execution.activity_id,"attempt_id":execution.attempt_id,"decision":{"action":"retry"},"evidence":"Stopped previous worker; completion receipt exists","operation_stopped":false});
     post(&client, &recovery_url, &decision, StatusCode::BAD_REQUEST).await;
     decision["operation_stopped"] = json!(true);
+    let mut fabricated = decision.clone();
+    fabricated["decision"] = json!({"action":"accept","result":{"status":"verified"}});
+    post(&client, &recovery_url, &fabricated, StatusCode::BAD_REQUEST).await;
     post(&client, &recovery_url, &decision, StatusCode::OK).await;
     settle(&engine).await;
     post(&client, &recovery_url, &decision, StatusCode::OK).await;

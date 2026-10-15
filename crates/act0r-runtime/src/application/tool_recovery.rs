@@ -56,7 +56,7 @@ impl ToolRecoveryService {
             || activity.spec.recovery != RecoveryPolicy::RequiresReconciliation
         {
             return Err(DomainError::InvalidReconciliation(
-                "only saved native edit/create/test/command calls are recoverable here".into(),
+                "only saved native edit/create/test/command calls and MCP actions are recoverable here".into(),
             )
             .into());
         }
@@ -104,21 +104,25 @@ impl ToolRecoveryService {
             })
         {
             let request = self.request(activity)?;
-            let observed = if self
+            let compatible = self
                 .tools
                 .definition(&request.definition.id)
-                .is_ok_and(|definition| *definition == request.definition)
-            {
+                .is_ok_and(|definition| *definition == request.definition);
+            let external = external_action(&request);
+            let observed = if compatible && external {
+                Ok(None)
+            } else if compatible {
                 self.inspector
                     .inspect_tool(activity.id, request.clone())
                     .await
+                    .map(Some)
             } else {
                 Err(Error::Unavailable(
                     "restore this tool's exact pinned contract before retrying".into(),
                 ))
             };
             let (inspection, inspection_error) = match observed {
-                Ok(view) => (Some(view), None),
+                Ok(view) => (view, None),
                 Err(error) => (None, Some(error.to_string())),
             };
             recovery = Some(ToolRecoveryView {
@@ -131,9 +135,11 @@ impl ToolRecoveryService {
                     || run.record().controls.boundary_pause,
                 retry_allowed: run.record().allowance.admitted < run.record().allowance.limit
                     && activity.attempts < activity.spec.retry.max_attempts
-                    && inspection
-                        .as_ref()
-                        .is_some_and(|view| view.conflict.is_none()),
+                    && compatible
+                    && (external
+                        || inspection
+                            .as_ref()
+                            .is_some_and(|view| view.conflict.is_none())),
                 inspection,
                 inspection_error,
             });
@@ -164,7 +170,22 @@ impl ToolRecoveryService {
             .iter()
             .find(|activity| activity.id == request.activity_id)
             .ok_or(DomainError::UnknownAttempt)?;
-        self.request(activity)?;
+        let saved_request = self.request(activity)?;
+        if let ToolRecoveryDecision::Accept { result } = &request.decision {
+            validate_external_result(&saved_request, result)?;
+        }
+        let recorded = run
+            .record()
+            .reconciliation_receipts
+            .iter()
+            .any(|receipt| receipt.request == request.clone().into());
+        if external_action(&saved_request)
+            && matches!(request.decision, ToolRecoveryDecision::Retry {})
+            && !recorded
+        {
+            self.tools
+                .check_pins(std::slice::from_ref(&saved_request.definition))?;
+        }
         if !run.attempts().iter().any(|attempt| {
             attempt.id == request.attempt_id && attempt.activity_id == request.activity_id
         }) {
