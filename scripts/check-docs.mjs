@@ -23,10 +23,14 @@ const cache = new Map();
 function visibleLines(text) {
   let fence;
   return text.split("\n").map(line => {
-    const marker = line.match(/^\s*(`{3,}|~{3,})/);
-    if (marker) {
-      if (!fence) fence = marker[1][0];
-      else if (fence === marker[1][0]) fence = undefined;
+    const open = line.match(/^\s*(`{3,}|~{3,})/);
+    const close = fence && line.match(/^\s*`{3,}\s*$|^\s*~{3,}\s*$/);
+    if (!fence && open) {
+      fence = open[1];
+      return "";
+    }
+    if (fence && close && close[0].trim()[0] === fence[0] && close[0].trim().length >= fence.length) {
+      fence = undefined;
       return "";
     }
     return fence ? "" : line;
